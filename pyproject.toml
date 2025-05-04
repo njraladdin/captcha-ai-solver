@@ -1,3 +1,32 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "captcha-solver"
+version = "0.1.0"
+description = "A package for solving reCAPTCHA challenges using audio transcription"
+readme = "README.md"
+authors = [
+    {name = "@njraladdin", email = "aladynjr@gmail.com"}
+]
+keywords = ["captcha", "recaptcha", "automation", "selenium", "seleniumbase"]
+requires-python = ">=3.7"
+dependencies = [
+    "seleniumbase",
+    "requests",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+]
+
+[tool.setuptools]
+packages = ["captcha_solver"]
+
 [tool.pytest.ini_options]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

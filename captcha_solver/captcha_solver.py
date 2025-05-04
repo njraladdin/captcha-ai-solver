@@ -72,9 +72,7 @@ class CaptchaSolver:
             
         Returns:
             SB: The initialized SeleniumBase instance.
-        """
-        from seleniumbase import SB
-        
+        """        
         print("Initializing SeleniumBase browser...")
         # Just return the SB class with parameters - will be used with 'with' statement
         return SB(uc=uc, test=test, locale=locale, ad_block=ad_block, pls=pls, **kwargs)

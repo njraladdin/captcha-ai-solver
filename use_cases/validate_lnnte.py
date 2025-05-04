@@ -50,7 +50,7 @@ def before_captcha_actions(sb):
         sb.cdp.wait_for_element_visible(submit_button_selector, timeout=15)
         sb.cdp.click(submit_button_selector)
         print("Submit button clicked.")
-        sb.sleep(5)
+        sb.sleep(1)
     except Exception as e:
         print(f"Error clicking submit button using CDP: {e}")
         # Save screenshot for debugging
@@ -94,7 +94,7 @@ def after_captcha_actions(sb, captcha_solved_successfully, recaptcha_token):
         print("\n--- CAPTCHA Not Solved - Skipping final submit button click ---")
 
 # --- Main Function ---
-def main():
+def validate_lnnte():
     """Main execution function"""
     print("Starting CAPTCHA Solver Workflow...")
 
@@ -128,4 +128,4 @@ def main():
 
 # Execute main function if script is run directly
 if __name__ == "__main__":
-    main()
+    validate_lnnte()
