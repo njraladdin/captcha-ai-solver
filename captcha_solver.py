@@ -832,3 +832,67 @@ class CaptchaSolver:
         # When the with block exits, the browser automatically closes
         print("Browser closed. Workflow complete.")
         return recaptcha_token, captcha_solved_successfully 
+
+if __name__ == "__main__":
+    import os
+    import sys
+    
+    # Get Wit.ai API key from environment variable or allow user to input it
+    wit_api_key = os.environ.get("WIT_API_KEY")
+    if not wit_api_key:
+        print("Please set the WIT_API_KEY environment variable and try again.")
+        sys.exit(1)
+    
+    # Create solver instance
+    print("\n=== Creating CaptchaSolver instance ===")
+    solver = CaptchaSolver(
+        wit_api_key=wit_api_key,
+        download_dir="./downloaded_audio",
+    )
+    
+    # Define a callback function to display the result after solving
+    def after_captcha_callback(sb, success, token):
+        if success and token:
+            print("\n=== CAPTCHA SOLVED SUCCESSFULLY! ===")
+            print(f"Token: {token[:30]}...{token[-30:] if token else ''}")
+            
+            # If we're on the demo page, we can also submit the form
+            if "demo" in sb.get_current_url():
+                try:
+                    print("\nAttempting to submit the demo form...")
+                    submit_button = sb.find_element("recaptcha-demo-submit")
+                    if submit_button:
+                        sb.click("recaptcha-demo-submit")
+                        print("Demo form submitted successfully!")
+                        # Wait to see the result
+                        sb.sleep(3)
+                except Exception as e:
+                    print(f"Error submitting the demo form: {e}")
+        else:
+            print("\n=== CAPTCHA SOLVING FAILED ===")
+    
+    # Set the demo URL
+    recaptcha_demo_url = "https://www.google.com/recaptcha/api2/demo"
+    
+    # Show instructions
+    print(f"\n=== Testing CaptchaSolver with URL: {recaptcha_demo_url} ===")
+    print("This will attempt to solve the reCAPTCHA on Google's demo page.")
+    print("Browser will stay open for 10 seconds after completion to observe the result.")
+    
+    try:
+        # Run the solver workflow
+        solver.after_captcha_callback = after_captcha_callback
+        token, success = solver.run_workflow(url=recaptcha_demo_url, observation_time=10)
+        
+        # Final result
+        if success and token:
+            print("\n=== TEST COMPLETED SUCCESSFULLY ===")
+            print(f"reCAPTCHA token obtained: {token[:20]}...")
+        else:
+            print("\n=== TEST COMPLETED WITH ERRORS ===")
+            print("Failed to solve the reCAPTCHA. See logs above for details.")
+    
+    except KeyboardInterrupt:
+        print("\nTest interrupted by user. Exiting...")
+    except Exception as e:
+        print(f"\nUnexpected error during test: {e}") 

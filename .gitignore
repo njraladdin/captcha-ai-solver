@@ -13,7 +13,7 @@
 downloaded_files/
 
 venv/
-
+tmp/
 # Python
 __pycache__/
 *.py[cod]
