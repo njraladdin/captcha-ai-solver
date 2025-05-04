@@ -58,7 +58,7 @@ class CaptchaSolver:
         # Ensure the download directory exists
         os.makedirs(self.download_dir, exist_ok=True)
     
-    def initialize_browser(self, uc=True, test=True, locale="en", ad_block=True, pls="none", **kwargs):
+    def initialize_browser(self, uc=True, test=True, locale="en", ad_block=True, pls="none", headless=False, **kwargs):
         """
         Initialize a SeleniumBase browser instance.
         
@@ -75,7 +75,7 @@ class CaptchaSolver:
         """        
         print("Initializing SeleniumBase browser...")
         # Just return the SB class with parameters - will be used with 'with' statement
-        return SB(uc=uc, test=test, locale=locale, ad_block=ad_block, pls=pls, **kwargs)
+        return SB(uc=uc, test=test, locale=locale, ad_block=ad_block, pls=pls, headless=headless, **kwargs)
 
     def _check_for_token(self, sb):
         """Check for token presence and return it if found"""
@@ -349,6 +349,7 @@ class CaptchaSolver:
             # (some CAPTCHAs don't require a challenge)
             sb.switch_to_default_content()
             print("Checking for immediate token after checkbox click...")
+            time.sleep(1)
             token_val = self._check_for_token(sb)
             if token_val:
                 print(f"SUCCESS! Immediate token found: {token_val[:20]}...")

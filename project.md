@@ -7,6 +7,7 @@
 
 - create test for captcha solver (with url directly), done 
 
+
 - implement concurrency options 
 
 - test with webshare proxy / test with proxy control mobile proxy 
