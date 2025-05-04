@@ -39,8 +39,10 @@ def before_captcha_actions(sb):
         sb.sleep(1)
     except Exception as e:
         print(f"Error interacting with {phone_input_selector} input using CDP: {e}")
-        sb.save_screenshot("error_phone_input.png")
-        sb.save_page_source("error_phone_input.html")
+        # Save screenshot for debugging
+        os.makedirs("tmp", exist_ok=True)
+        sb.save_screenshot("tmp/error_phone_input.png")
+        sb.save_page_source("tmp/error_phone_input.html")
         raise
 
     print("Clicking the submit button using CDP...")
@@ -51,8 +53,10 @@ def before_captcha_actions(sb):
         sb.sleep(5)
     except Exception as e:
         print(f"Error clicking submit button using CDP: {e}")
-        sb.save_screenshot("error_submit_click.png")
-        sb.save_page_source("error_submit_click.html")
+        # Save screenshot for debugging
+        os.makedirs("tmp", exist_ok=True)
+        sb.save_screenshot("tmp/error_submit_click.png")
+        sb.save_page_source("tmp/error_submit_click.html")
         raise
 
 # --- After CAPTCHA actions ---
@@ -97,7 +101,7 @@ def main():
     # Create a CaptchaSolver instance with callbacks
     captcha_solver = CaptchaSolver(
         wit_api_key=WIT_API_KEY, 
-        download_dir=".",
+        download_dir="tmp",
         before_captcha_callback=before_captcha_actions,
         after_captcha_callback=after_captcha_actions
     )

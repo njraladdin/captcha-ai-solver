@@ -10,3 +10,5 @@
 - implement concurrency options 
 
 - test with webshare proxy / test with proxy control mobile proxy 
+
+- add lnnte usecase 

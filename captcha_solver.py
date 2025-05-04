@@ -38,13 +38,13 @@ class CaptchaSolver:
     RECAPTCHA_ERROR_MESSAGE_SELECTOR = ".rc-audiochallenge-error-message"  # In challenge frame
     RECAPTCHA_ERROR_MESSAGE_TEXT = "Multiple correct solutions required"  # Common "need more" text
     
-    def __init__(self, wit_api_key=None, download_dir=".", before_captcha_callback=None, after_captcha_callback=None):
+    def __init__(self, wit_api_key=None, download_dir="tmp", before_captcha_callback=None, after_captcha_callback=None):
         """
         Initialize the CaptchaSolver.
         
         Args:
             wit_api_key (str, optional): API key for Wit.ai speech recognition service
-            download_dir (str, optional): Directory where audio files will be saved. Defaults to current directory.
+            download_dir (str, optional): Directory where audio files will be saved. Defaults to 'tmp' directory.
             before_captcha_callback (callable, optional): Function to call before solving captcha. Will receive SeleniumBase instance.
             after_captcha_callback (callable, optional): Function to call after solving captcha. Will receive SeleniumBase instance,
                                                        success status, and token.
@@ -54,6 +54,9 @@ class CaptchaSolver:
         self.before_captcha_callback = before_captcha_callback
         self.after_captcha_callback = after_captcha_callback
         self.browser = None
+        
+        # Ensure the download directory exists
+        os.makedirs(self.download_dir, exist_ok=True)
     
     def initialize_browser(self, uc=True, test=True, locale="en", ad_block=True, pls="none", **kwargs):
         """
@@ -642,7 +645,7 @@ class CaptchaSolver:
                             if audio_attempt == max_audio_attempts - 1:
                                 captcha_solved_successfully = False
                                 error_message = f"Submission failed: {submit_err}"
-                                sb.save_screenshot("captcha_submit_error.png")
+                                sb.save_screenshot(os.path.join(self.download_dir, "captcha_submit_error.png"))
                     
                     # End of audio challenge retry loop
                     if not transcription_submitted:
@@ -667,8 +670,8 @@ class CaptchaSolver:
                     print("Driver not available to determine frame context.")
             except Exception as frame_err:
                 print(f"Could not determine current frame context: {frame_err}")
-            sb.save_screenshot("captcha_reconnect_error.png")
-            sb.save_page_source("captcha_reconnect_error.html")
+            sb.save_screenshot(os.path.join(self.download_dir, "captcha_reconnect_error.png"))
+            sb.save_page_source(os.path.join(self.download_dir, "captcha_reconnect_error.html"))
 
         except Exception as e:
             print(f"UNEXPECTED ERROR during WebDriver interaction: {e}")
@@ -682,8 +685,8 @@ class CaptchaSolver:
                     print("Driver not available to determine frame context.")
             except Exception as frame_err:
                 print(f"Could not determine current frame context: {frame_err}")
-            sb.save_screenshot("captcha_unexpected_error.png")
-            sb.save_page_source("captcha_unexpected_error.html")
+            sb.save_screenshot(os.path.join(self.download_dir, "captcha_unexpected_error.png"))
+            sb.save_page_source(os.path.join(self.download_dir, "captcha_unexpected_error.html"))
 
         finally:
             print("\n--- Finalizing reCAPTCHA Interaction ---")
@@ -824,8 +827,8 @@ class CaptchaSolver:
             except Exception as e:
                 print(f"ERROR in captcha solving workflow: {e}")
                 try:
-                    sb.save_screenshot("workflow_error.png")
-                    sb.save_page_source("workflow_error.html")
+                    sb.save_screenshot(os.path.join(self.download_dir, "workflow_error.png"))
+                    sb.save_page_source(os.path.join(self.download_dir, "workflow_error.html"))
                 except Exception as screenshot_err:
                     print(f"Could not save error screenshot: {screenshot_err}")
         
@@ -847,7 +850,7 @@ if __name__ == "__main__":
     print("\n=== Creating CaptchaSolver instance ===")
     solver = CaptchaSolver(
         wit_api_key=wit_api_key,
-        download_dir="./downloaded_audio",
+        download_dir="tmp",
     )
     
     # Define a callback function to display the result after solving

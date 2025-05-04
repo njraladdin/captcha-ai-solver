@@ -30,9 +30,11 @@ def before_captcha_actions(sb):
         print("Phone number typed.")
         sb.sleep(1)
     except Exception as e:
-        print(f"Error interacting with {phone_input_selector} input: {e}")
-        sb.save_screenshot("error_phone_input.png")
-        sb.save_page_source("error_phone_input.html")
+        print(f"Error interacting with {phone_input_selector} input using CDP: {e}")
+        # Save screenshot for debugging
+        os.makedirs("tmp", exist_ok=True)
+        sb.save_screenshot("tmp/error_phone_input.png")
+        sb.save_page_source("tmp/error_phone_input.html")
         raise
     
     # Click submit button to trigger captcha
@@ -45,9 +47,11 @@ def before_captcha_actions(sb):
         print("Submit button clicked.")
         sb.sleep(2)  # Short wait to let page respond
     except Exception as e:
-        print(f"Error clicking submit button: {e}")
-        sb.save_screenshot("error_submit_click.png")
-        sb.save_page_source("error_submit_click.html")
+        print(f"Error clicking submit button using CDP: {e}")
+        # Save screenshot for debugging
+        os.makedirs("tmp", exist_ok=True)
+        sb.save_screenshot("tmp/error_submit_click.png")
+        sb.save_page_source("tmp/error_submit_click.html")
         raise
     
     print("--- before_captcha_actions completed ---\n")
@@ -100,7 +104,7 @@ def main():
     # Create captcha solver instance
     captcha_solver = CaptchaSolver(
         wit_api_key=wit_api_key,
-        download_dir="downloaded_files"
+        download_dir="tmp"
     )
     
     print("Starting SeleniumBase with UC Mode...")
