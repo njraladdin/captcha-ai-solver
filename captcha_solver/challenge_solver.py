@@ -5,19 +5,17 @@ import os
 import requests
 import random
 
-class CaptchaSolver:
+class ChallengeSolver:
     """
     A class for solving reCAPTCHA challenges using audio transcription.
     
     This class encapsulates all the functionality needed to solve reCAPTCHAs, including:
-    1. Browser initialization and lifecycle management
-    2. Finding and clicking the initial checkbox
-    3. Checking if token is immediately available (no challenge)
-    4. If needed, switching to the audio challenge
-    5. Downloading, transcribing, and submitting the audio challenge
-    6. Handling retry logic for multiple audio challenges if needed
-    7. Detecting and handling various error cases (blocking, multiple solutions required)
-    8. Executing pre and post-CAPTCHA callbacks
+    1. Finding and clicking the initial checkbox
+    2. Checking if token is immediately available (no challenge)
+    3. If needed, switching to the audio challenge
+    4. Downloading, transcribing, and submitting the audio challenge
+    5. Handling retry logic for multiple audio challenges if needed
+    6. Detecting and handling various error cases (blocking, multiple solutions required)
     """
     
     # Default selectors for reCAPTCHA elements
@@ -38,45 +36,20 @@ class CaptchaSolver:
     RECAPTCHA_ERROR_MESSAGE_SELECTOR = ".rc-audiochallenge-error-message"  # In challenge frame
     RECAPTCHA_ERROR_MESSAGE_TEXT = "Multiple correct solutions required"  # Common "need more" text
     
-    def __init__(self, wit_api_key=None, download_dir="tmp", before_captcha_callback=None, after_captcha_callback=None):
+    def __init__(self, wit_api_key=None, download_dir="tmp"):
         """
-        Initialize the CaptchaSolver.
+        Initialize the ChallengeSolver.
         
         Args:
             wit_api_key (str, optional): API key for Wit.ai speech recognition service
             download_dir (str, optional): Directory where audio files will be saved. Defaults to 'tmp' directory.
-            before_captcha_callback (callable, optional): Function to call before solving captcha. Will receive SeleniumBase instance.
-            after_captcha_callback (callable, optional): Function to call after solving captcha. Will receive SeleniumBase instance,
-                                                       success status, and token.
         """
         self.wit_api_key = wit_api_key
         self.download_dir = download_dir
-        self.before_captcha_callback = before_captcha_callback
-        self.after_captcha_callback = after_captcha_callback
-        self.browser = None
         
         # Ensure the download directory exists
         os.makedirs(self.download_dir, exist_ok=True)
     
-    def initialize_browser(self, uc=True, test=True, locale="en", ad_block=True, pls="none", headless=False, **kwargs):
-        """
-        Initialize a SeleniumBase browser instance.
-        
-        Args:
-            uc (bool, optional): Use undetected-chromedriver mode. Defaults to True.
-            test (bool, optional): Test mode flag. Defaults to True.
-            locale (str, optional): Browser locale. Defaults to "en".
-            ad_block (bool, optional): Enable ad blocking. Defaults to True.
-            pls (str, optional): Pass level security. Defaults to "none".
-            **kwargs: Additional keyword arguments to pass to SeleniumBase constructor.
-            
-        Returns:
-            SB: The initialized SeleniumBase instance.
-        """        
-        print("Initializing SeleniumBase browser...")
-        # Just return the SB class with parameters - will be used with 'with' statement
-        return SB(uc=uc, test=test, locale=locale, ad_block=ad_block, pls=pls, headless=headless, **kwargs)
-
     def _check_for_token(self, sb):
         """Check for token presence and return it if found"""
         try:
@@ -278,7 +251,7 @@ class CaptchaSolver:
 
         return None  # Should never reach here, but just in case 
 
-    def solve(self, sb, url=None):
+    def solve(self, sb):
         """
         Solves the reCAPTCHA challenge using audio transcription.
         
@@ -291,8 +264,7 @@ class CaptchaSolver:
         6. Detecting and handling various error cases (blocking, multiple solutions required)
         
         Args:
-            sb: SeleniumBase instance (should be an active browser session, not a context manager)
-            url (str, optional): If provided, will navigate to this URL in CDP mode first
+            sb: SeleniumBase instance (should be an active browser session)
             
         Returns:
             tuple: (token, success_status)
@@ -301,15 +273,7 @@ class CaptchaSolver:
         """
         print("\n--- Starting reCAPTCHA Interaction ---")
         
-        # Handle connection state - we need WebDriver mode for iframe interaction
-        # First, navigate to URL in CDP mode if requested
-        if url:
-            print(f"Navigating to URL using CDP mode: {url}")
-            sb.activate_cdp_mode(url)
-            print(f"Current connection state: {'Connected' if sb.is_connected() else 'CDP Mode (disconnected)'}")
-        
-        # Then ensure WebDriver is connected for iframe interactions
-        # We need to reconnect if we're in CDP mode
+        # Check if WebDriver is connected for iframe interactions
         if not sb.is_connected():
             print("WebDriver not connected. Reconnecting for iframe interaction...")
             sb.reconnect()
@@ -627,75 +591,6 @@ class CaptchaSolver:
         
         return recaptcha_token, captcha_solved_successfully
 
-    def run_workflow(self, url, observation_time=0):
-        """
-        Run the complete CAPTCHA solving workflow from browser initialization to closing.
-        
-        This method:
-        1. Initializes a browser instance with UC mode enabled
-        2. Navigates to the target URL (if no before_captcha_callback provided)
-        3. Executes before-captcha actions (if callback provided)
-        4. Solves the CAPTCHA
-        5. Executes after-captcha actions (if callback provided)
-        6. Optionally keeps the browser open for observation
-        7. Closes the browser
-        
-        Args:
-            url (str): The URL to navigate to
-            observation_time (int, optional): Seconds to keep browser open after completion. Set to 0 to close immediately.
-            
-        Returns:
-            tuple: (recaptcha_token, captcha_solved_successfully)
-        """
-        # Initialize browser with fixed SeleniumBase options
-        print(f"\n--- Starting CaptchaSolver Workflow for URL: {url} ---")
-        sb_instance = self.initialize_browser(uc=True, test=True, locale="en", ad_block=True, pls="none")
-        
-        recaptcha_token = None
-        captcha_solved_successfully = False
-        
-        # Use the context manager properly with 'with' statement
-        with sb_instance as sb:
-            try:
-                # Execute pre-captcha actions
-                print("\n--- Executing Pre-CAPTCHA Actions ---")
-                if self.before_captcha_callback:
-                    print("Running user-provided before_captcha_callback...")
-                    # Let the callback handle navigation and setup
-                    self.before_captcha_callback(sb)
-                else:
-                    # Default action - navigate to the URL
-                    print(f"No pre-captcha callback provided. Navigating to URL: {url}")
-                    sb.activate_cdp_mode(url)
-                    print(f"Currently connected: {sb.is_connected()}")  # False in CDP mode
-                    sb.sleep(2)  # Brief wait for page to load
-                
-                # Solve the CAPTCHA
-                print("\n--- Solving CAPTCHA ---")
-                recaptcha_token, captcha_solved_successfully = self.solve(sb)
-                
-                # Execute after-captcha actions (if provided)
-                if self.after_captcha_callback:
-                    print("\n--- Executing After-CAPTCHA Actions ---")
-                    self.after_captcha_callback(sb, captcha_solved_successfully, recaptcha_token)
-                
-                # Observe final state if requested
-                if observation_time > 0:
-                    print(f"\nProcessing finished. Observing final state for {observation_time} seconds...")
-                    sb.sleep(observation_time)
-                
-            except Exception as e:
-                print(f"ERROR in captcha solving workflow: {e}")
-                try:
-                    sb.save_screenshot(os.path.join(self.download_dir, "workflow_error.png"))
-                    sb.save_page_source(os.path.join(self.download_dir, "workflow_error.html"))
-                except Exception as screenshot_err:
-                    print(f"Could not save error screenshot: {screenshot_err}")
-        
-        # When the with block exits, the browser automatically closes
-        print("Browser closed. Workflow complete.")
-        return recaptcha_token, captcha_solved_successfully
-
 if __name__ == "__main__":
     import os
     import sys
@@ -707,55 +602,8 @@ if __name__ == "__main__":
         sys.exit(1)
     
     # Create solver instance
-    print("\n=== Creating CaptchaSolver instance ===")
-    solver = CaptchaSolver(
+    print("\n=== Creating ChallengeSolver instance ===")
+    solver = ChallengeSolver(
         wit_api_key=wit_api_key,
         download_dir="tmp",
-    )
-    
-    # Define a callback function to display the result after solving
-    def after_captcha_callback(sb, success, token):
-        if success and token:
-            print("\n=== CAPTCHA SOLVED SUCCESSFULLY! ===")
-            print(f"Token: {token[:30]}...{token[-30:] if token else ''}")
-            
-            # If we're on the demo page, we can also submit the form
-            if "demo" in sb.get_current_url():
-                try:
-                    print("\nAttempting to submit the demo form...")
-                    submit_button = sb.find_element("recaptcha-demo-submit")
-                    if submit_button:
-                        sb.click("recaptcha-demo-submit")
-                        print("Demo form submitted successfully!")
-                        # Wait to see the result
-                        sb.sleep(3)
-                except Exception as e:
-                    print(f"Error submitting the demo form: {e}")
-        else:
-            print("\n=== CAPTCHA SOLVING FAILED ===")
-    
-    # Set the demo URL
-    recaptcha_demo_url = "https://www.google.com/recaptcha/api2/demo"
-    
-    # Show instructions
-    print(f"\n=== Testing CaptchaSolver with URL: {recaptcha_demo_url} ===")
-    print("This will attempt to solve the reCAPTCHA on Google's demo page.")
-    print("Browser will stay open for 10 seconds after completion to observe the result.")
-    
-    try:
-        # Run the solver workflow
-        solver.after_captcha_callback = after_captcha_callback
-        token, success = solver.run_workflow(url=recaptcha_demo_url, observation_time=10)
-        
-        # Final result
-        if success and token:
-            print("\n=== TEST COMPLETED SUCCESSFULLY ===")
-            print(f"reCAPTCHA token obtained: {token[:20]}...")
-        else:
-            print("\n=== TEST COMPLETED WITH ERRORS ===")
-            print("Failed to solve the reCAPTCHA. See logs above for details.")
-    
-    except KeyboardInterrupt:
-        print("\nTest interrupted by user. Exiting...")
-    except Exception as e:
-        print(f"\nUnexpected error during test: {e}") 
+    ) 

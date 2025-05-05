@@ -1,18 +1,19 @@
 #!/usr/bin/env python
 """
-Demo script combining CaptchaExtractor, ReplicatedCaptcha, and TokenApplier.
+Demo script combining CaptchaExtractor, CaptchaReplicator, ChallengeSolver, and TokenApplier.
 
-This script demonstrates a complete workflow:
+This script demonstrates a complete workflow with clear separation of concerns:
 1. Extract reCAPTCHA parameters from a target website
-2. Automatically solve the reCAPTCHA using audio recognition
-3. Apply the solved token back to the original website
+2. Replicate the reCAPTCHA in a separate browser window
+3. Solve the replicated reCAPTCHA using audio recognition
+4. Apply the solved token back to the original website
 """
 
 import sys
 import time
 import os
 from seleniumbase import SB
-from captcha_solver import CaptchaExtractor, ReplicatedCaptcha, TokenApplier
+from captcha_solver import CaptchaExtractor, CaptchaReplicator, ChallengeSolver, TokenApplier
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -30,13 +31,13 @@ def main():
         print("Set the WIT_API_KEY environment variable with your Wit.ai API key and try again.")
         return 1
 
-    print("\n=== Complete reCAPTCHA Workflow Demo ===")
+    print("\n=== Complete reCAPTCHA Workflow Demo (Modular Approach) ===")
     print(f"Target URL: {target_url}")
-    print(f"Auto-solving is ALWAYS enabled")
 
-    # Create instances of all three classes
+    # Create instances of all component classes
     extractor = CaptchaExtractor(download_dir="tmp")
-    replicator = ReplicatedCaptcha(download_dir="tmp")
+    replicator = CaptchaReplicator(download_dir="tmp")
+    solver = ChallengeSolver(wit_api_key=wit_api_key, download_dir="tmp")
     applier = TokenApplier(download_dir="tmp")
 
     # Initialize original browser that will be kept open throughout the process
@@ -68,44 +69,54 @@ def main():
                 print("The page may not have a reCAPTCHA, or it might be dynamically loaded.")
                 return 1
 
-            # Step 2: Automatically solve the reCAPTCHA
-            print("\n=== Step 2: Solving reCAPTCHA Automatically ===")
-            print("Using audio recognition to solve the CAPTCHA...")
+            # Step 2: Replicate the reCAPTCHA in a separate browser window
+            print("\n=== Step 2: Replicating reCAPTCHA ===")
+            print("Opening replicated reCAPTCHA in a new browser window...")
 
-            # Solve the captcha using extracted parameters (always auto-solve)
-            _, _, token = replicator.run_replicated_captcha(
+            # Replicate the captcha using extracted parameters
+            # Only run the replicated captcha for 5 seconds to initialize the browser,
+            # we'll handle solving separately
+            html_path, replicated_sb, initial_token = replicator.replicate_captcha(
                 website_key=params["website_key"],
                 website_url=params["website_url"],
                 is_invisible=params["is_invisible"],
                 data_s_value=params["data_s_value"],
                 is_enterprise=params["is_enterprise"],
-                observation_time=4,      # Give it 30 seconds to solve
-                auto_solve=True,          # Always auto-solve
-                wit_api_key=wit_api_key   # API key for Wit.ai
+                observation_time=5  # Just enough time to load, we'll solve separately
             )
-
+            
+            if not replicated_sb:
+                print("\nERROR: Failed to create replicated CAPTCHA browser. Aborting.")
+                return 1
+                
+            # Step 3: Solve the replicated CAPTCHA
+            print("\n=== Step 3: Solving Replicated reCAPTCHA ===")
+            print("Using audio recognition to solve the CAPTCHA...")
+            
+            # Solve the CAPTCHA using the replicated browser
+            token, success = solver.solve(replicated_sb)
+            
+            # If solving failed, check if token was captured by the monitor thread
+            if not success or not token:
+                token = replicator.get_last_token()
+            
+            # Clean up the replicated browser and server
+            print("Closing replicated CAPTCHA browser...")
+            try:
+                replicated_sb.quit()
+            except:
+                pass
+            replicator.stop_http_server()
+                
             # Check if we got a token
             if not token:
-                print("\nERROR: Failed to solve the CAPTCHA automatically.")
-                # Try one more time with the get_token method
-                print("Trying again with direct token retrieval method...")
-                token = replicator.get_token(
-                    website_key=params["website_key"],
-                    website_url=params["website_url"],
-                    is_invisible=params["is_invisible"],
-                    data_s_value=params["data_s_value"],
-                    is_enterprise=params["is_enterprise"],
-                    timeout=45,  # Longer timeout for retry
-                    wit_api_key=wit_api_key
-                )
+                print("\nERROR: Failed to solve the CAPTCHA. Aborting.")
+                return 1
                 
-                if not token:
-                    print("\nERROR: Still failed to get a token. Aborting.")
-                    return 1
+            print(f"CAPTCHA solved successfully! Token obtained (length: {len(token)})")
 
-            # Step 3: Apply the token back to the original page
-            print("\n=== Step 3: Applying Solved Token to Original Page ===")
-            print(f"Token obtained! Length: {len(token)}")
+            # Step 4: Apply the token back to the original page
+            print("\n=== Step 4: Applying Solved Token to Original Page ===")
 
             # Apply the token to the original reCAPTCHA
             success = applier.apply_token(sb, token, params, submit_form=True)
