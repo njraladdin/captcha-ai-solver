@@ -24,22 +24,18 @@ class CaptchaExtractor:
         print("Initializing SeleniumBase browser...")
         return SB(uc=uc, headless=headless, **kwargs)
     
-    def extract_recaptcha_params(self, target, wait_time=10, close_browser=True):
+    def extract_recaptcha_params(self, target):
         """
         Extract reCAPTCHA parameters from a webpage.
         
         Args:
             target: Either a URL string or an active SeleniumBase instance.
-            wait_time: Time to wait for reCAPTCHA elements. Defaults to 10 seconds.
-            close_browser: Whether to close the browser after extraction if
-                          a new browser was opened. Defaults to True.
         
         Returns:
             dict: Dictionary containing extracted reCAPTCHA parameters
         """
         # Initialize variables
         sb = None
-        should_close_browser = False
         params = {
             "website_url": None,
             "website_key": None,
@@ -55,7 +51,6 @@ class CaptchaExtractor:
             if isinstance(target, str):
                 # It's a URL, initialize a new browser
                 sb = self.initialize_browser(uc=True)
-                should_close_browser = close_browser
                 
                 # Navigate to the URL
                 with sb as browser:
@@ -63,9 +58,6 @@ class CaptchaExtractor:
                     print(f"Navigating to URL: {target}")
                     browser.open(target)
                     sb = browser  # Save browser instance outside the context manager
-                    
-                    # Wait for the page to load
-                    sb.sleep(wait_time/2)
                     
                     # Extract parameters
                     self._extract_with_javascript(sb, params)
@@ -93,15 +85,6 @@ class CaptchaExtractor:
             
             # Return any parameters we managed to collect
             return params
-        
-        finally:
-            # Close the browser if we opened it and were asked to close it
-            if should_close_browser and sb and hasattr(sb, 'driver') and sb.driver:
-                try:
-                    print("Closing browser...")
-                    sb.driver.quit()
-                except:
-                    pass
     
     def _extract_with_javascript(self, sb, params):
         """Extract all reCAPTCHA parameters using JavaScript."""
@@ -201,14 +184,12 @@ class CaptchaExtractor:
             except Exception as e:
                 print(f"Error extracting additional parameters: {e}")
     
-    def extract_and_print(self, target, wait_time=10, close_browser=True):
+    def extract_captcha_params(self, target):
         """
         Extract reCAPTCHA parameters and print them in a nicely formatted way.
         
         Args:
             target: Either a URL string or an active SeleniumBase instance
-            wait_time: Time to wait for elements. Defaults to 10 seconds.
-            close_browser: Whether to close browser after extraction. Defaults to True.
         
         Returns:
             dict: Dictionary of extracted parameters
@@ -216,7 +197,7 @@ class CaptchaExtractor:
         print("\n=== Starting reCAPTCHA Parameter Extraction ===")
         
         # Extract parameters
-        params = self.extract_recaptcha_params(target, wait_time, close_browser)
+        params = self.extract_recaptcha_params(target)
         
         # Print results
         print("\n=== reCAPTCHA Parameters Extracted ===")
@@ -254,7 +235,7 @@ if __name__ == "__main__":
     
     # Extract and print
     try:
-        params = extractor.extract_and_print(url)
+        params = extractor.extract_captcha_params(url)
         print("\nExtraction completed successfully.")
     except Exception as e:
         print(f"\nError during extraction: {e}")

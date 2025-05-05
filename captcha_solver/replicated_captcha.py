@@ -7,6 +7,10 @@ import socket
 from urllib.parse import urlparse
 from seleniumbase import SB
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
+import flask
+import logging
+from flask import Flask, send_from_directory
+import requests
 
 
 class ReplicatedCaptcha:
@@ -32,7 +36,9 @@ class ReplicatedCaptcha:
         self.server_port = server_port
         self.server = None
         self.server_thread = None
+        self.flask_app = None
         self.browser = None
+        self.last_token = None  # Store the last solved token
         
         # Ensure the download directory exists
         os.makedirs(self.download_dir, exist_ok=True)
@@ -245,7 +251,10 @@ class ReplicatedCaptcha:
             return s.getsockname()[1]
     
     def start_http_server(self):
-        """Start a simple HTTP server in a separate thread."""
+        """
+        Start a Flask HTTP server in a separate thread.
+        Returns the port number on which the server is running.
+        """
         # Use a free port if the specified one is taken
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -254,160 +263,310 @@ class ReplicatedCaptcha:
             print(f"Port {self.server_port} is in use. Finding an available port...")
             self.server_port = self._get_free_port()
         
-        # Create a handler and server
-        handler = http.server.SimpleHTTPRequestHandler
-        self.server = socketserver.TCPServer(("", self.server_port), handler)
+        # Ensure absolute path for download directory
+        abs_download_dir = os.path.abspath(self.download_dir)
+        print(f"Serving files from: {abs_download_dir}")
         
-        # Change the working directory to the download directory
-        os.chdir(self.download_dir)
+        # Disable Flask logging to avoid cluttering the console
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.ERROR)
+        
+        # Create a Flask app
+        self.flask_app = Flask(__name__)
+        
+        # Define route for root to list files (optional)
+        @self.flask_app.route('/')
+        def index():
+            files = os.listdir(abs_download_dir)
+            file_links = ['<li><a href="/{0}">{0}</a></li>'.format(f) for f in files]
+            return f"""
+            <html>
+                <head><title>Replicated CAPTCHA Server</title></head>
+                <body>
+                    <h1>Available CAPTCHA Files</h1>
+                    <ul>{''.join(file_links)}</ul>
+                </body>
+            </html>
+            """
+            
+        # Define route to serve files from the download directory
+        @self.flask_app.route('/<path:filename>')
+        def serve_file(filename):
+            return send_from_directory(abs_download_dir, filename)
+        
+        # Add a shutdown route for clean termination
+        @self.flask_app.route('/shutdown')
+        def shutdown():
+            func = flask.request.environ.get('werkzeug.server.shutdown')
+            if func is None:
+                raise RuntimeError('Not running with the Werkzeug Server')
+            func()
+            return 'Server shutting down...'
         
         # Start the server in a separate thread
         print(f"Starting HTTP server on port {self.server_port}...")
-        self.server_thread = threading.Thread(target=self.server.serve_forever)
+        self.server_thread = threading.Thread(
+            target=lambda: self.flask_app.run(
+                host='localhost', 
+                port=self.server_port, 
+                debug=False, 
+                use_reloader=False
+            )
+        )
         self.server_thread.daemon = True  # So the thread will exit when the main program exits
         self.server_thread.start()
+        
+        # Brief pause to ensure server starts up
+        time.sleep(1)
         
         return self.server_port
     
     def stop_http_server(self):
         """Stop the HTTP server if it's running."""
-        if self.server:
+        if self.server_thread and self.flask_app:
             print("Stopping HTTP server...")
-            self.server.shutdown()
-            self.server.server_close()
-            self.server = None
+            # Use a more reliable way to shut down the Flask server
+            try:
+                # Create a request to shutdown the server
+                requests.get(f"http://localhost:{self.server_port}/shutdown")
+            except:
+                pass  # If it fails, the daemon thread will be killed on program exit anyway
+            
             self.server_thread = None
+            self.flask_app = None
     
     def run_replicated_captcha(self, website_key, website_url, is_invisible=False, data_s_value=None, 
-                              api_domain="google.com", user_agent=None, cookies=None, observation_time=100):
+                              is_enterprise=False, api_domain="google.com", user_agent=None, 
+                              cookies=None, observation_time=100):
         """
-        Create and open a replicated reCAPTCHA challenge in a browser.
+        Create and display a replicated reCAPTCHA challenge.
         
         Args:
             website_key (str): reCAPTCHA sitekey
             website_url (str): The URL of the target website
             is_invisible (bool, optional): Whether to use invisible reCAPTCHA. Defaults to False.
             data_s_value (str, optional): The value of data-s parameter. Defaults to None.
-            api_domain (str, optional): Domain used to load captcha (google.com or recaptcha.net). 
-                                       Defaults to "google.com".
-            user_agent (str, optional): User-Agent to use for the browser. Defaults to None.
-            cookies (str, optional): Cookies to set in the browser. Format: "key1=val1; key2=val2". 
-                                    Defaults to None.
-            observation_time (int, optional): Seconds to keep browser open. 0 means stay open until manually closed.
-                                           Defaults to 100.
+            is_enterprise (bool, optional): Whether to use Enterprise reCAPTCHA. Defaults to False.
+            api_domain (str, optional): Domain to load captcha from. Defaults to "google.com".
+            user_agent (str, optional): User agent to use. Defaults to None.
+            cookies (list, optional): Cookies to set. Defaults to None.
+            observation_time (int, optional): Time to keep browser open. Defaults to 100.
+                                           Set to 0 to keep open until closed manually.
         
         Returns:
-            tuple: (html_file_path, browser_instance)
-                - html_file_path: Path to the created HTML file
-                - browser_instance: The SeleniumBase browser instance (if still open)
+            tuple: (Path to the HTML file, browser instance)
         """
-        print(f"\n--- Starting Replicated reCAPTCHA for sitekey: {website_key} ---")
-        
-        # Create the HTML file with the reCAPTCHA
-        html_file_path = self.create_captcha_html(
-            website_key=website_key,
-            website_url=website_url,
-            is_invisible=is_invisible,
-            data_s_value=data_s_value,
-            api_domain=api_domain
-        )
-        
-        # Start the HTTP server to serve the HTML file
-        server_port = self.start_http_server()
-        
-        # Extract just the filename from the full path
-        html_filename = os.path.basename(html_file_path)
-        server_url = f"http://localhost:{server_port}/{html_filename}"
-        
-        # Initialize browser
-        sb_instance = self.initialize_browser(uc=True)
-        browser = None
-        
-        with sb_instance as sb:
-            try:
-                # Set user agent if provided
+        try:
+            # Reset the last token
+            self.last_token = None
+            
+            # Select appropriate API domain for Enterprise reCAPTCHA
+            if is_enterprise and not api_domain.endswith('enterprise'):
+                if api_domain == "google.com":
+                    api_domain = "www.google.com/recaptcha/enterprise"
+                elif api_domain == "recaptcha.net":
+                    api_domain = "recaptcha.net/recaptcha/enterprise"
+            
+            # Create HTML file with appropriate challenge type
+            html_path = self.create_captcha_html(
+                website_key, 
+                website_url, 
+                is_invisible=is_invisible,
+                data_s_value=data_s_value,
+                api_domain=api_domain
+            )
+            
+            # Start HTTP server
+            server_port = self.start_http_server()
+            if not server_port:
+                print("Failed to start HTTP server")
+                return None, None
+            
+            # Form URL to the HTML file (with proper http:// prefix)
+            file_basename = os.path.basename(html_path)
+            local_file_url = f"http://localhost:{server_port}/{file_basename}"
+            print(f"Replicated reCAPTCHA URL: {local_file_url}")
+            
+            # Initialize browser
+            browser = self.initialize_browser(uc=True)
+            self.browser = browser
+            
+            with browser as sb:
+                # Navigate to the HTML page
+                sb.open(local_file_url)
+                
+                # Set user agent if specified
                 if user_agent:
-                    print(f"Setting user agent: {user_agent}")
-                    sb.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": user_agent})
+                    sb.execute_script(f"Object.defineProperty(navigator, 'userAgent', " + 
+                                     f"{{get: function() {{return '{user_agent}'}}}});")
                 
-                # Navigate to the HTML file through the local server
-                print(f"Opening replicated reCAPTCHA page via HTTP server: {server_url}")
-                sb.open(server_url)
+                # Set cookies if specified
+                if cookies:
+                    for cookie in cookies:
+                        sb.add_cookie(cookie)
                 
-                # Set cookies for the target website if provided
-                if cookies and website_url:
+                # Check if reCAPTCHA loads properly or has domain error
+                try:
+                    # Wait for either the reCAPTCHA iframe or error message
+                    sb.wait_for_element_present("iframe[src*='recaptcha']", timeout=10)
+                    print("reCAPTCHA iframe loaded successfully")
+                except (NoSuchElementException, TimeoutException):
                     try:
-                        print(f"Setting cookies for domain: {website_url}")
-                        # Extract domain from website_url
-                        domain = urlparse(website_url).netloc
-                        
-                        # Parse and set cookies
-                        cookie_pairs = cookies.split(';')
-                        for pair in cookie_pairs:
-                            if '=' in pair:
-                                name, value = pair.strip().split('=', 1)
-                                sb.add_cookie({'name': name, 'value': value, 'domain': domain})
-                    except Exception as cookie_err:
-                        print(f"Warning: Could not set cookies: {cookie_err}")
+                        # Check for domain error message
+                        error_element = sb.find_element("div#error-message")
+                        if error_element:
+                            print(f"Error: {error_element.text}")
+                            print("This may be due to domain restrictions on the reCAPTCHA site key.")
+                    except:
+                        print("reCAPTCHA failed to load but no specific error was found")
                 
-                # Wait for reCAPTCHA to load
-                print("Waiting for reCAPTCHA to load...")
-                sb.wait_for_element_present('iframe[src*="api2/anchor"]', timeout=10)
-                print("reCAPTCHA loaded successfully.")
-                
-                # If we need to keep the browser open
+                # Start a thread to monitor for token updates
+                self._start_token_monitor(sb)
+                    
                 if observation_time > 0:
-                    print(f"Observing for {observation_time} seconds...")
+                    # Keep the window open for the specified time
+                    print(f"Keeping browser open for {observation_time} seconds...")
                     sb.sleep(observation_time)
-                    browser = None
                 else:
-                    print("Keeping browser open. Please close manually when finished.")
-                    browser = sb
-                    return html_file_path, browser  # Return without closing the browser
+                    # Keep the window open until manually closed
+                    print("Browser will remain open until manually closed or token is received...")
+                    while True:
+                        # Check if browser is still open
+                        try:
+                            # Get the current URL to check if browser is still open
+                            current_url = sb.get_current_url()
+                            
+                            # Check if we have a token
+                            if self.last_token:
+                                print(f"Token received, length: {len(self.last_token)}")
+                                print("You can close the browser window now, or it will close automatically in 5 seconds...")
+                                sb.sleep(5)
+                                break
+                            
+                            # Brief pause to avoid high CPU usage
+                            sb.sleep(1)
+                        except:
+                            # Browser was closed by user
+                            print("Browser was closed by user")
+                            break
                 
-            except (NoSuchElementException, TimeoutException) as e:
-                print(f"Error loading reCAPTCHA: {e}")
-                sb.save_screenshot(os.path.join(self.download_dir, "replicated_captcha_error.png"))
-                browser = None
+                # Optionally, you can add code here to automatically solve the CAPTCHA
+                # or to extract the token once solved
                 
-            except Exception as e:
-                print(f"Unexpected error: {e}")
-                sb.save_screenshot(os.path.join(self.download_dir, "replicated_captcha_error.png"))
-                browser = None
+                return html_path, browser
         
-        # Stop the server
-        self.stop_http_server()
-        return html_file_path, browser
+        except Exception as e:
+            print(f"Error in run_replicated_captcha: {e}")
+            self.stop_http_server()
+            return None, None
+
+    def _start_token_monitor(self, sb):
+        """
+        Start a background thread to monitor for token updates.
+        
+        Args:
+            sb: SeleniumBase browser instance
+        """
+        def monitor():
+            try:
+                # Check every second for token updates
+                for _ in range(600):  # Monitor for up to 10 minutes
+                    try:
+                        # Get token from the display element
+                        token = sb.execute_script("""
+                            const display = document.getElementById('g-recaptcha-response-display');
+                            if (display && display.innerText && display.innerText !== '[No token yet]') {
+                                return display.innerText;
+                            }
+                            return null;
+                        """)
+                        
+                        if token and token != '[No token yet]':
+                            self.last_token = token
+                            print(f"Token captured (length: {len(token)})")
+                            break
+                            
+                        # Also check the textarea directly
+                        textarea_token = sb.execute_script("""
+                            const textarea = document.querySelector('textarea[name="g-recaptcha-response"]');
+                            if (textarea && textarea.value) {
+                                return textarea.value;
+                            }
+                            return null;
+                        """)
+                        
+                        if textarea_token:
+                            self.last_token = textarea_token
+                            print(f"Token captured from textarea (length: {len(textarea_token)})")
+                            break
+                            
+                    except Exception as e:
+                        print(f"Error in token monitor: {e}")
+                        break
+                        
+                    # Sleep for 1 second before checking again
+                    time.sleep(1)
+            except:
+                # Handle any exceptions in the monitor thread
+                pass
+                
+        # Start the monitor in a background thread
+        threading.Thread(target=monitor, daemon=True).start()
+        
+    def get_last_token(self):
+        """
+        Get the last solved reCAPTCHA token.
+        
+        Returns:
+            str: The last solved token, or None if no token has been captured
+        """
+        return self.last_token
 
 
 # Simple example usage
 if __name__ == "__main__":
-    # Create an instance of ReplicatedCaptcha
-    replicated_captcha = ReplicatedCaptcha(download_dir="tmp")
-    
-    # Example reCAPTCHA parameters from Google's demo page
-    website_key = "6Le-wvkSAAAAAPBMRTvw0Q4Muexq9bi0DJwx_mJ-"
-    website_url = "https://www.google.com/recaptcha/api2/demo"
-    
-    print("\n=== Testing ReplicatedCaptcha ===")
-    print(f"Opening replicated reCAPTCHA with sitekey: {website_key}")
-    print("Browser will stay open for 100 seconds by default (or until manually closed).")
-    
     try:
-        # Run the replicated captcha
-        html_path, browser = replicated_captcha.run_replicated_captcha(
-            website_key=website_key,
-            website_url=website_url
-        )
+        # Create an instance of ReplicatedCaptcha
+        # Use absolute path for download directory to avoid any issues
+        download_dir = os.path.abspath("tmp")
+        print(f"Using download directory: {download_dir}")
         
-        # This point is reached only after browser is closed or timeout
-        print("\n=== Completed replicated CAPTCHA session ===")
+        replicated_captcha = ReplicatedCaptcha(download_dir=download_dir)
         
-    except KeyboardInterrupt:
-        print("\nTest interrupted by user. Exiting...")
-        # Ensure server is stopped
-        replicated_captcha.stop_http_server()
-    except Exception as e:
-        print(f"\nUnexpected error during test: {e}")
-        # Ensure server is stopped
-        replicated_captcha.stop_http_server() 
+        # Example reCAPTCHA parameters from Google's demo page
+        website_key = "6Le-wvkSAAAAAPBMRTvw0Q4Muexq9bi0DJwx_mJ-"
+        website_url = "https://www.google.com/recaptcha/api2/demo"
+        
+        print("\n=== Testing ReplicatedCaptcha ===")
+        print(f"Opening replicated reCAPTCHA with sitekey: {website_key}")
+        print("Browser will stay open for 100 seconds by default (or until manually closed).")
+        
+        try:
+            # Run the replicated captcha
+            html_path, browser = replicated_captcha.run_replicated_captcha(
+                website_key=website_key,
+                website_url=website_url
+            )
+            
+            if not html_path or not browser:
+                print("Failed to start reCAPTCHA session. See error messages above.")
+                replicated_captcha.stop_http_server()
+                exit(1)
+                
+            # This point is reached only after browser is closed or timeout
+            print("\n=== Completed replicated CAPTCHA session ===")
+            
+        except KeyboardInterrupt:
+            print("\nTest interrupted by user. Exiting...")
+            # Ensure server is stopped
+            replicated_captcha.stop_http_server()
+        except Exception as e:
+            print(f"\nUnexpected error during test: {e}")
+            # Ensure server is stopped
+            replicated_captcha.stop_http_server()
+    finally:
+        # Ensure any lingering servers are stopped
+        try:
+            replicated_captcha.stop_http_server()
+        except:
+            pass 

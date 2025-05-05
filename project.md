@@ -9,6 +9,8 @@
 
 - implement concurrency options, done 
 
+- solve captcha without having to go to captcha page : extra captcha prams, provide them to solver and produce token, 
+
 - test with webshare proxy / test with proxy control mobile proxy 
 
 - send request with captcha token instead of going to next page 
