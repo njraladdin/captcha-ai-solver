@@ -11,6 +11,7 @@ import flask
 import logging
 from flask import Flask, send_from_directory
 import requests
+from .replicated_captcha_solver import CaptchaSolver
 
 
 class ReplicatedCaptcha:
@@ -337,7 +338,7 @@ class ReplicatedCaptcha:
     
     def run_replicated_captcha(self, website_key, website_url, is_invisible=False, data_s_value=None, 
                               is_enterprise=False, api_domain="google.com", user_agent=None, 
-                              cookies=None, observation_time=100):
+                              cookies=None, observation_time=100, auto_solve=False, wit_api_key=None):
         """
         Create and display a replicated reCAPTCHA challenge.
         
@@ -352,9 +353,11 @@ class ReplicatedCaptcha:
             cookies (list, optional): Cookies to set. Defaults to None.
             observation_time (int, optional): Time to keep browser open. Defaults to 100.
                                            Set to 0 to keep open until closed manually.
+            auto_solve (bool, optional): Whether to automatically solve the captcha. Defaults to False.
+            wit_api_key (str, optional): API key for Wit.ai if auto_solve is True. Defaults to None.
         
         Returns:
-            tuple: (Path to the HTML file, browser instance)
+            tuple: (Path to the HTML file, browser instance, token)
         """
         try:
             # Reset the last token
@@ -380,7 +383,7 @@ class ReplicatedCaptcha:
             server_port = self.start_http_server()
             if not server_port:
                 print("Failed to start HTTP server")
-                return None, None
+                return None, None, None
             
             # Form URL to the HTML file (with proper http:// prefix)
             file_basename = os.path.basename(html_path)
@@ -390,6 +393,9 @@ class ReplicatedCaptcha:
             # Initialize browser
             browser = self.initialize_browser(uc=True)
             self.browser = browser
+            
+            token = None
+            success = False
             
             with browser as sb:
                 # Navigate to the HTML page
@@ -410,6 +416,24 @@ class ReplicatedCaptcha:
                     # Wait for either the reCAPTCHA iframe or error message
                     sb.wait_for_element_present("iframe[src*='recaptcha']", timeout=10)
                     print("reCAPTCHA iframe loaded successfully")
+                    
+                    # If auto_solve is enabled, attempt to solve the captcha automatically
+                    if auto_solve:
+                        print("Auto-solve enabled, attempting to solve captcha...")
+                        token, success = self.solve_captcha_with_solver(sb, wit_api_key=wit_api_key)
+                        
+                        if success and token:
+                            print("Captcha successfully solved automatically!")
+                            # Update the token display on the page
+                            sb.execute_script(f"""
+                                const display = document.getElementById('g-recaptcha-response-display');
+                                if (display) {{
+                                    display.innerText = '{token}';
+                                }}
+                            """)
+                        else:
+                            print("Automatic solving failed. You may solve it manually.")
+                    
                 except (NoSuchElementException, TimeoutException):
                     try:
                         # Check for domain error message
@@ -420,8 +444,9 @@ class ReplicatedCaptcha:
                     except:
                         print("reCAPTCHA failed to load but no specific error was found")
                 
-                # Start a thread to monitor for token updates
-                self._start_token_monitor(sb)
+                # Start a thread to monitor for token updates if not already solved
+                if not (success and token):
+                    self._start_token_monitor(sb)
                     
                 if observation_time > 0:
                     # Keep the window open for the specified time
@@ -438,7 +463,9 @@ class ReplicatedCaptcha:
                             
                             # Check if we have a token
                             if self.last_token:
-                                print(f"Token received, length: {len(self.last_token)}")
+                                token = self.last_token
+                                success = True
+                                print(f"Token received, length: {len(token)}")
                                 print("You can close the browser window now, or it will close automatically in 5 seconds...")
                                 sb.sleep(5)
                                 break
@@ -450,15 +477,12 @@ class ReplicatedCaptcha:
                             print("Browser was closed by user")
                             break
                 
-                # Optionally, you can add code here to automatically solve the CAPTCHA
-                # or to extract the token once solved
-                
-                return html_path, browser
+                return html_path, browser, token
         
         except Exception as e:
             print(f"Error in run_replicated_captcha: {e}")
             self.stop_http_server()
-            return None, None
+            return None, None, None
 
     def _start_token_monitor(self, sb):
         """
@@ -521,6 +545,123 @@ class ReplicatedCaptcha:
             str: The last solved token, or None if no token has been captured
         """
         return self.last_token
+        
+    def solve_captcha_with_solver(self, browser, wit_api_key=None, download_dir=None):
+        """
+        Use the CaptchaSolver to solve the captcha in the replicated_captcha page.
+        
+        This method attempts to solve the reCAPTCHA challenge displayed in the current browser
+        session using the CaptchaSolver's audio solution method.
+        
+        Args:
+            browser: The SeleniumBase browser instance showing the captcha
+            wit_api_key (str, optional): API key for Wit.ai speech recognition. 
+                                        If None, uses environment variable.
+            download_dir (str, optional): Directory for saving temporary files.
+                                        Defaults to the same as ReplicatedCaptcha.
+                                        
+        Returns:
+            tuple: (token, success_flag) - The reCAPTCHA token and whether solving was successful
+        """
+        print("\n--- Starting Automated CAPTCHA Solving ---")
+        
+        # Use provided download_dir or default to the same as ReplicatedCaptcha
+        if not download_dir:
+            download_dir = self.download_dir
+        
+        # Get Wit.ai API key from parameter or environment variable
+        if not wit_api_key:
+            wit_api_key = os.environ.get("WIT_API_KEY")
+            if not wit_api_key:
+                print("ERROR: Wit.ai API Key not provided and not found in environment.")
+                return None, False
+        
+        # Create a CaptchaSolver instance
+        solver = CaptchaSolver(
+            wit_api_key=wit_api_key,
+            download_dir=download_dir
+        )
+        
+        try:
+            # Solve the CAPTCHA using the provided browser instance
+            token, success = solver.solve(browser)
+            
+            # Update last_token if successful
+            if success and token:
+                self.last_token = token
+                print(f"Token successfully obtained with CaptchaSolver: {token[:20]}...")
+            else:
+                print("CaptchaSolver failed to obtain a token")
+            
+            return token, success
+            
+        except Exception as e:
+            print(f"ERROR in captcha_solver integration: {e}")
+            try:
+                browser.save_screenshot(os.path.join(download_dir, "solver_integration_error.png"))
+            except Exception as screenshot_err:
+                print(f"Could not save error screenshot: {screenshot_err}")
+            
+            return None, False
+
+    def get_token(self, website_key, website_url, is_invisible=False, data_s_value=None, 
+                 is_enterprise=False, api_domain="google.com", user_agent=None, 
+                 cookies=None, timeout=30, wit_api_key=None):
+        """
+        Get a reCAPTCHA token programmatically with automatic solving.
+        
+        This is a convenience method that runs the replicated captcha with auto-solve
+        enabled and returns just the token. The browser is closed automatically after
+        solving or when the timeout is reached.
+        
+        Args:
+            website_key (str): reCAPTCHA sitekey
+            website_url (str): The URL of the target website
+            is_invisible (bool, optional): Whether to use invisible reCAPTCHA. Defaults to False.
+            data_s_value (str, optional): The value of data-s parameter. Defaults to None.
+            is_enterprise (bool, optional): Whether to use Enterprise reCAPTCHA. Defaults to False.
+            api_domain (str, optional): Domain to load captcha from. Defaults to "google.com".
+            user_agent (str, optional): User agent to use. Defaults to None.
+            cookies (list, optional): Cookies to set. Defaults to None.
+            timeout (int, optional): Maximum time to wait for token in seconds. Defaults to 30.
+            wit_api_key (str, optional): API key for Wit.ai. If None, uses environment variable.
+            
+        Returns:
+            str or None: The reCAPTCHA token if successful, None otherwise
+        """
+        print("\n=== Getting reCAPTCHA Token Programmatically ===")
+        
+        # Get Wit.ai API key from parameter or environment
+        if not wit_api_key:
+            wit_api_key = os.environ.get("WIT_API_KEY")
+            if not wit_api_key:
+                print("ERROR: Wit.ai API Key not provided and not found in environment.")
+                return None
+        
+        try:
+            # Run the replicated captcha with auto-solve enabled
+            _, _, token = self.run_replicated_captcha(
+                website_key=website_key,
+                website_url=website_url,
+                is_invisible=is_invisible,
+                data_s_value=data_s_value,
+                is_enterprise=is_enterprise,
+                api_domain=api_domain,
+                user_agent=user_agent,
+                cookies=cookies,
+                observation_time=timeout,
+                auto_solve=True,
+                wit_api_key=wit_api_key
+            )
+            
+            return token
+            
+        except Exception as e:
+            print(f"ERROR getting token programmatically: {e}")
+            return None
+        finally:
+            # Always stop the HTTP server
+            self.stop_http_server()
 
 
 # Simple example usage
@@ -539,19 +680,45 @@ if __name__ == "__main__":
         
         print("\n=== Testing ReplicatedCaptcha ===")
         print(f"Opening replicated reCAPTCHA with sitekey: {website_key}")
-        print("Browser will stay open for 100 seconds by default (or until manually closed).")
+        
+        # Check if WIT_API_KEY is set in environment
+        wit_api_key = os.environ.get("WIT_API_KEY")
+        auto_solve = wit_api_key is not None
+        
+        if auto_solve:
+            print("Wit.ai API key found in environment. AUTO-SOLVE is enabled.")
+            print("The solver will attempt to automatically solve the CAPTCHA using audio recognition.")
+            observation_time = 15  # Shorter time if auto-solving
+        else:
+            print("No Wit.ai API key found in environment variables. AUTO-SOLVE is disabled.")
+            print("You will need to solve the CAPTCHA manually.")
+            observation_time = 100  # Longer time for manual solving
+        
+        print(f"Browser will stay open for {observation_time} seconds (or until token is received).")
         
         try:
             # Run the replicated captcha
-            html_path, browser = replicated_captcha.run_replicated_captcha(
+            html_path, browser, token = replicated_captcha.run_replicated_captcha(
                 website_key=website_key,
-                website_url=website_url
+                website_url=website_url,
+                auto_solve=auto_solve,
+                wit_api_key=wit_api_key,
+                observation_time=observation_time
             )
             
             if not html_path or not browser:
                 print("Failed to start reCAPTCHA session. See error messages above.")
                 replicated_captcha.stop_http_server()
                 exit(1)
+            
+            # Display token info if available
+            if token:
+                print("\n=== CAPTCHA TOKEN OBTAINED ===")
+                print(f"Token (first 30 chars): {token[:30]}...")
+                print(f"Token length: {len(token)}")
+            else:
+                print("\n=== NO TOKEN OBTAINED ===")
+                print("The CAPTCHA was not solved or token was not captured.")
                 
             # This point is reached only after browser is closed or timeout
             print("\n=== Completed replicated CAPTCHA session ===")

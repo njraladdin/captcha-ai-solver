@@ -1,96 +1,98 @@
 # reCAPTCHA Solver
 
-A Python-based solution for automatically solving reCAPTCHA challenges using audio transcription.
+An automated solution for solving Google's reCAPTCHA v2 challenges using audio recognition.
 
 ## Features
 
-- Solves Google reCAPTCHA v2 challenges using audio transcription
-- Handles automatic detection of when challenges are required
-- Efficiently processes audio with Wit.ai speech recognition API
-- Manages retry logic for multiple audio challenges if needed
-- Detects various error cases (blocking, multiple solutions required)
-- **Auto-manages SeleniumBase connection states** (CDP mode and WebDriver reconnection)
+- **Extract**: Automatically extract reCAPTCHA parameters from any website
+- **Solve**: Automatically solve reCAPTCHA challenges using audio recognition
+- **Apply**: Apply the solved token back to the original website
+
+## Components
+
+- **CaptchaExtractor**: Extracts reCAPTCHA parameters from target websites
+- **ReplicatedCaptcha**: Creates a clean environment to solve the reCAPTCHA
+- **CaptchaSolver**: Automatically solves reCAPTCHA using audio recognition
+- **TokenApplier**: Applies the solved token back to the original page
 
 ## Requirements
 
-- Python 3.6+
+- Python 3.7+
 - SeleniumBase
-- A Wit.ai API key for speech-to-text transcription
+- Requests
+- Flask
+- Wit.ai API key (required)
 
 ## Installation
 
-1. Clone this repository:
-   ```
-   git clone https://github.com/yourusername/recaptcha-solver.git
-   cd recaptcha-solver
-   ```
+```bash
+pip install seleniumbase requests flask
+```
 
-2. Install the required dependencies:
-   ```
-   pip install seleniumbase requests python-dotenv
-   ```
+## Setting up Wit.ai
 
-3. Create a `.env` file in the root directory with your Wit.ai API key:
-   ```
-   WIT_AI_API_KEY=your_wit_ai_api_key
+To use the automated solver, you must have a Wit.ai API key:
+
+1. Get a free API key from [Wit.ai](https://wit.ai/)
+2. Set it as an environment variable:
+   ```bash
+   # Windows
+   set WIT_API_KEY=your-api-key
+   
+   # Linux/Mac
+   export WIT_API_KEY=your-api-key
    ```
 
 ## Usage
 
-### Basic Usage
+### Running the Demo
 
-```python
-from seleniumbase import SB
-from captcha_solver import CaptchaSolver
-import os
-from dotenv import load_dotenv
+The demo_workflow.py script demonstrates the complete process:
 
-# Load environment variables
-load_dotenv()
-wit_api_key = os.getenv("WIT_AI_API_KEY")
-
-# Create a CaptchaSolver instance
-captcha_solver = CaptchaSolver(wit_api_key=wit_api_key)
-
-# Use SeleniumBase to navigate to the page with reCAPTCHA
-with SB(uc=True) as sb:
-    # The CaptchaSolver handles all connection states internally
-    # It will reconnect the WebDriver if necessary
-    token, success = captcha_solver.solve(sb)
-    
-    if success:
-        print(f"CAPTCHA solved successfully! Token: {token[:20]}...")
-        # Continue with form submission or other actions
-    else:
-        print("Failed to solve CAPTCHA")
+```bash
+python demo_workflow.py
 ```
 
-### Connection State Management
+This will:
+1. Navigate to Google's reCAPTCHA demo page
+2. Extract the reCAPTCHA parameters
+3. Automatically solve the reCAPTCHA using audio recognition
+4. Apply the token back to the original page
+5. Submit the form
 
-The `CaptchaSolver` class and helper functions now handle all connection state changes internally:
+### Programmatic Usage
 
-1. `before_captcha_actions(sb)` - Activates CDP mode for initial page interaction
-2. `captcha_solver.solve(sb)` - Reconnects the WebDriver as needed for iframe interaction
-3. `after_captcha_actions(sb, success, token)` - Reconnects the WebDriver if needed for final form submission
+```python
+from captcha_solver import ReplicatedCaptcha
 
-This allows a clean, simple flow in your main code without worrying about connection states.
+# Get a token programmatically (fully automatic)
+replicated_captcha = ReplicatedCaptcha(download_dir="tmp")
+token = replicated_captcha.get_token(
+    website_key="your-site-key",
+    website_url="https://example.com",
+    timeout=30
+)
 
-### Advanced Usage
-
-See the `example_usage.py` and `main.py` files for more comprehensive examples.
+# Use the token in your application
+if token:
+    # Use the token in your form submission or API call
+    payload = {'g-recaptcha-response': token, 'other_data': 'value'}
+    response = requests.post('https://example.com/submit', data=payload)
+```
 
 ## How It Works
 
-1. The solver first locates and clicks the reCAPTCHA checkbox
-2. If a challenge appears, it switches to the audio challenge
-3. It downloads the audio file and sends it to Wit.ai for transcription
-4. The transcribed text is entered into the challenge field
-5. The solver verifies if the challenge was successful and returns the reCAPTCHA token
+1. **Extraction**: The system identifies and extracts reCAPTCHA parameters from the target website
+2. **Solving**: The system replicates the challenge, clicks the audio button, downloads the audio, uses Wit.ai to transcribe it, and submits the answer
+3. **Application**: The resulting token is applied to the original website using JavaScript injection
+
+## Notes
+
+- Works best with standard reCAPTCHA implementations
+- Enterprise reCAPTCHA might require additional customization
+- Using the system too frequently from the same IP might trigger Google's blocking mechanisms
+- This tool is meant for legitimate automation purposes
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Disclaimer
-
-This tool is for educational purposes only. Using automated tools to solve CAPTCHAs may violate the terms of service of some websites. Use responsibly and at your own risk. 
+MIT 
