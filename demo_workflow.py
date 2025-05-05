@@ -1,43 +1,102 @@
 #!/usr/bin/env python
 """
-Demo script combining CaptchaExtractor, CaptchaReplicator, ChallengeSolver, and TokenApplier.
+Demo script showing two approaches to solve reCAPTCHA:
 
-This script demonstrates a complete workflow with clear separation of concerns:
-1. Extract reCAPTCHA parameters from a target website
-2. Replicate the reCAPTCHA in a separate browser window
-3. Solve the replicated reCAPTCHA using audio recognition
-4. Apply the solved token back to the original website
+1. Simplified Approach: Using CaptchaSolver with explicitly managed extraction
+2. Detailed Approach: Using individual components for maximum control
+
+This demonstrates how the modular library can be used, maintaining
+clear separation of concerns between extraction, solving, and token application.
 """
 
 import sys
 import time
 import os
 from seleniumbase import SB
-from captcha_solver import CaptchaExtractor, CaptchaReplicator, ChallengeSolver, TokenApplier
+from captcha_solver import CaptchaSolver, CaptchaExtractor, CaptchaReplicator, ChallengeSolver, TokenApplier
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def main():
-    """Run the complete reCAPTCHA workflow demonstration."""
-    # Default settings - always use Google's demo page
+def demo_simplified_approach():
+    """Demo the simplified approach using CaptchaSolver with explicit extraction."""
+    # Default settings - use Google's demo page
     target_url = "https://www.google.com/recaptcha/api2/demo"
-    wait_time = 2
-
-    # Get Wit.ai API key from environment - required for automatic solving
+    
+    # Get Wit.ai API key from environment
     wit_api_key = os.environ.get("WIT_API_KEY")
     if not wit_api_key:
         print("ERROR: WIT_API_KEY environment variable is not set.")
-        print("Set the WIT_API_KEY environment variable with your Wit.ai API key and try again.")
-        return 1
+        return False
+        
+    print("\n=== DEMO 1: Simplified reCAPTCHA Solving Approach ===")
+    print("Using CaptchaSolver with explicit extraction")
+    print(f"Target URL: {target_url}")
+    
+    # Create CaptchaSolver and CaptchaExtractor instances
+    solver = CaptchaSolver(wit_api_key=wit_api_key, download_dir="tmp")
+    extractor = CaptchaExtractor(download_dir="tmp")
+    
+    # Initialize browser
+    browser = SB(uc=True, test=True, locale="en", ad_block=True, pls="none", headless=False)
+    
+    try:
+        with browser as sb:
+            # Navigate to the target URL
+            print(f"\nNavigating to {target_url}...")
+            sb.open(target_url)
+            
+            # Wait for page to load
+            print(f"Waiting for page to load...")
+            sb.sleep(2)
+            
+            # Extract parameters
+            print("\nExtracting reCAPTCHA parameters...")
+            params = extractor.extract_captcha_params(sb)
+            
+            if not params.get("website_key"):
+                print("\nERROR: Could not extract reCAPTCHA site key.")
+                return False
+            
+            # Solve the captcha
+            print("\nSolving reCAPTCHA...")
+            token, success = solver.solve(params)
+            
+            if not success or not token:
+                print("\nFailed to solve reCAPTCHA.")
+                return False
+            
+            print(f"\nCAPTCHA solved successfully! Token: {token[:20]}...")
+            return True
+    
+    except Exception as e:
+        print(f"\nError during simplified demo: {e}")
+        return False
+    finally:
+        try:
+            browser.quit()
+        except:
+            pass
 
-    print("\n=== Complete reCAPTCHA Workflow Demo (Modular Approach) ===")
+def demo_detailed_approach():
+    """Demo the detailed approach with direct component usage."""
+    # Default settings - use Google's demo page
+    target_url = "https://www.google.com/recaptcha/api2/demo"
+    wait_time = 2
+
+    # Get Wit.ai API key from environment
+    wit_api_key = os.environ.get("WIT_API_KEY")
+    if not wit_api_key:
+        print("ERROR: WIT_API_KEY environment variable is not set.")
+        return False
+
+    print("\n=== DEMO 2: Detailed reCAPTCHA Solving Approach ===")
+    print("Using individual components for maximum control")
     print(f"Target URL: {target_url}")
 
     # Create instances of all component classes
     extractor = CaptchaExtractor(download_dir="tmp")
-    replicator = CaptchaReplicator(download_dir="tmp")
-    solver = ChallengeSolver(wit_api_key=wit_api_key, download_dir="tmp")
+    solver = CaptchaSolver(wit_api_key=wit_api_key, download_dir="tmp")
     applier = TokenApplier(download_dir="tmp")
 
     # Initialize original browser that will be kept open throughout the process
@@ -66,57 +125,24 @@ def main():
             # Check if we have the necessary parameters to proceed
             if not params["website_key"]:
                 print("\nERROR: Could not extract reCAPTCHA site key.")
-                print("The page may not have a reCAPTCHA, or it might be dynamically loaded.")
-                return 1
+                return False
 
-            # Step 2: Replicate the reCAPTCHA in a separate browser window
-            print("\n=== Step 2: Replicating reCAPTCHA ===")
-            print("Opening replicated reCAPTCHA in a new browser window...")
-
-            # Replicate the captcha using extracted parameters
-            # Only run the replicated captcha for 5 seconds to initialize the browser,
-            # we'll handle solving separately
-            html_path, replicated_sb, initial_token = replicator.replicate_captcha(
-                website_key=params["website_key"],
-                website_url=params["website_url"],
-                is_invisible=params["is_invisible"],
-                data_s_value=params["data_s_value"],
-                is_enterprise=params["is_enterprise"],
-                observation_time=5  # Just enough time to load, we'll solve separately
-            )
+            # Step 2: Solve the captcha using the unified solver
+            print("\n=== Step 2: Solving reCAPTCHA ===")
+            print("Using the CaptchaSolver to solve the replicated CAPTCHA...")
             
-            if not replicated_sb:
-                print("\nERROR: Failed to create replicated CAPTCHA browser. Aborting.")
-                return 1
-                
-            # Step 3: Solve the replicated CAPTCHA
-            print("\n=== Step 3: Solving Replicated reCAPTCHA ===")
-            print("Using audio recognition to solve the CAPTCHA...")
-            
-            # Solve the CAPTCHA using the replicated browser
-            token, success = solver.solve(replicated_sb)
-            
-            # If solving failed, check if token was captured by the monitor thread
-            if not success or not token:
-                token = replicator.get_last_token()
-            
-            # Clean up the replicated browser and server
-            print("Closing replicated CAPTCHA browser...")
-            try:
-                replicated_sb.quit()
-            except:
-                pass
-            replicator.stop_http_server()
+            # Solve the CAPTCHA using extracted parameters
+            token, success = solver.solve(params)
                 
             # Check if we got a token
             if not token:
                 print("\nERROR: Failed to solve the CAPTCHA. Aborting.")
-                return 1
+                return False
                 
             print(f"CAPTCHA solved successfully! Token obtained (length: {len(token)})")
 
-            # Step 4: Apply the token back to the original page
-            print("\n=== Step 4: Applying Solved Token to Original Page ===")
+            # Step 3: Apply the token back to the original page
+            print("\n=== Step 3: Applying Solved Token to Original Page ===")
 
             # Apply the token to the original reCAPTCHA
             success = applier.apply_token(sb, token, params, submit_form=True)
@@ -168,19 +194,14 @@ def main():
             print("\nKeeping browser open for observation (10 seconds)...")
             sb.sleep(10)
 
-        print("\n=== Complete reCAPTCHA Workflow Demo Completed ===")
-        return 0
+        return success
 
     except KeyboardInterrupt:
         print("\nDemo interrupted by user. Cleaning up...")
-        # Ensure all resources are cleaned up
-        replicator.stop_http_server()
-        return 1
+        return False
     except Exception as e:
         print(f"\nError during demo: {e}")
-        # Ensure all resources are cleaned up
-        replicator.stop_http_server()
-        return 1
+        return False
     finally:
         # Make sure browser is closed
         if browser and hasattr(browser, 'driver') and browser.driver:
@@ -189,6 +210,35 @@ def main():
             except:
                 pass
 
+def main():
+    """Run both demo approaches and report results."""
+    # Get Wit.ai API key from environment - required for automatic solving
+    wit_api_key = os.environ.get("WIT_API_KEY")
+    if not wit_api_key:
+        print("ERROR: WIT_API_KEY environment variable is not set.")
+        print("Set the WIT_API_KEY environment variable with your Wit.ai API key and try again.")
+        return 1
+
+    print("\n=== reCAPTCHA Solver Library Demo ===")
+    print("This demo shows two different approaches to using the library.")
+    
+    # Demo 1: Simplified approach
+    simplified_success = demo_simplified_approach()
+    
+    # Demo 2: Detailed approach
+    detailed_success = demo_detailed_approach()
+    
+    # Report results
+    print("\n=== Demo Results ===")
+    print(f"Simplified approach: {'✅ Success' if simplified_success else '❌ Failed'}")
+    print(f"Detailed approach: {'✅ Success' if detailed_success else '❌ Failed'}")
+    
+    if simplified_success or detailed_success:
+        print("\n✅ At least one approach succeeded!")
+        return 0
+    else:
+        print("\n❌ Both approaches failed. This could be due to network issues or reCAPTCHA blocking.")
+        return 1
 
 if __name__ == "__main__":
     sys.exit(main())

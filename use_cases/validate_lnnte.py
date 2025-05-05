@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
-from captcha_solver import CaptchaSolver
+from captcha_solver import CaptchaSolver, TokenApplier, CaptchaExtractor
+from seleniumbase import SB
 import time
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
@@ -124,47 +125,71 @@ def process_phone_number(phone_number):
     """
     process_print(f"\n=== Processing phone number: {phone_number} ===")
     
-    # Create a callback function that includes the phone number
-    def before_callback(sb):
-        before_captcha_actions(sb, phone_number)
-        
-    def after_callback(sb, captcha_solved_successfully, recaptcha_token):
-        after_captcha_actions(sb, captcha_solved_successfully, recaptcha_token, phone_number)
-    
     # Create a filename-safe version of the phone number for file naming
     safe_phone = phone_number.replace('-', '')
     
-    # Create a CaptchaSolver instance with callbacks
+    browser = None
     try:
-        captcha_solver = CaptchaSolver(
-            wit_api_key=WIT_API_KEY, 
-            download_dir=TMP_DIR,  # Use the main tmp directory
-            before_captcha_callback=before_callback,
-            after_captcha_callback=after_callback
-        )
+        # Initialize the browser
+        browser = SB(uc=True, test=True, locale="en", ad_block=True, pls="none", headless=False)
         
-        # Run the workflow for this phone number
-        recaptcha_token, captcha_solved_successfully = captcha_solver.run_workflow(
-            url=url,
-            observation_time=2  # Keep browser open for 2 seconds at the end
-        )
-        
-        # Report the outcome for this phone number
-        if captcha_solved_successfully:
-            process_print(f"\n[{phone_number}] CAPTCHA workflow completed successfully! Token: {recaptcha_token[:20]}...")
-        else:
-            process_print(f"\n[{phone_number}] CAPTCHA workflow failed.")
-        
-        return phone_number, captcha_solved_successfully
+        with browser as sb:
+            # First, perform the actions before solving the captcha
+            before_captcha_actions(sb, phone_number)
+            
+            # Extract CAPTCHA parameters
+            process_print(f"[{phone_number}] Extracting CAPTCHA parameters...")
+            extractor = CaptchaExtractor(download_dir=TMP_DIR)
+            params = extractor.extract_captcha_params(sb)
+            
+            if not params.get("website_key"):
+                process_print(f"[{phone_number}] Failed to extract CAPTCHA parameters. Aborting.")
+                return phone_number, False
+            
+            # Create a CaptchaSolver instance
+            process_print(f"[{phone_number}] Creating CaptchaSolver instance...")
+            solver = CaptchaSolver(wit_api_key=WIT_API_KEY, download_dir=TMP_DIR)
+            
+            # Solve the CAPTCHA
+            process_print(f"[{phone_number}] Solving CAPTCHA...")
+            recaptcha_token, captcha_solved_successfully = solver.solve(params)
+            
+            # If we have a token, apply it to the original page
+            if captcha_solved_successfully and recaptcha_token:
+                process_print(f"[{phone_number}] Applying token to original page...")
+                applier = TokenApplier(download_dir=TMP_DIR)
+                token_applied = applier.apply_token(sb, recaptcha_token, params)
+                
+                if not token_applied:
+                    process_print(f"[{phone_number}] Failed to apply token. Trying direct submission anyway.")
+            
+            # Perform the actions after solving the captcha
+            after_captcha_actions(sb, captcha_solved_successfully, recaptcha_token, phone_number)
+            
+            # Report the outcome for this phone number
+            if captcha_solved_successfully:
+                process_print(f"[{phone_number}] CAPTCHA workflow completed successfully! Token: {recaptcha_token[:20]}...")
+            else:
+                process_print(f"[{phone_number}] CAPTCHA workflow failed.")
+            
+            return phone_number, captcha_solved_successfully
+            
     except Exception as e:
-        process_print(f"\n[{phone_number}] EXCEPTION during processing: {e}")
-        # Save error information to a log file in the tmp directory
+        process_print(f"[{phone_number}] EXCEPTION during processing: {e}")
+        # Save error information to a log file
         try:
             with open(f"{TMP_DIR}/error_log_{safe_phone}.txt", "w") as f:
                 f.write(f"Error processing {phone_number}: {str(e)}")
         except:
             pass  # If we can't write to the log file, just continue
         return phone_number, False
+    finally:
+        # Make sure browser is closed
+        if browser and hasattr(browser, 'driver') and browser.driver:
+            try:
+                browser.quit()
+            except:
+                pass
 
 # --- Main Function ---
 def validate_lnnte_numbers():
