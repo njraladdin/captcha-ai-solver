@@ -337,7 +337,7 @@ class CaptchaReplicator:
     
     def replicate_captcha(self, website_key, website_url, is_invisible=False, data_s_value=None, 
                           is_enterprise=False, api_domain="google.com", user_agent=None, 
-                          cookies=None, observation_time=100):
+                          cookies=None, observation_time=1):
         """
         Create and display a replicated reCAPTCHA challenge.
         

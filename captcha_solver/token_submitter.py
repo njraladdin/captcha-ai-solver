@@ -741,9 +741,7 @@ if __name__ == "__main__":
             else:
                 print("\n❌ Token application failed")
                 
-            # Keep browser open for observation
-            print("\nKeeping browser open for 5 seconds for observation...")
-            sb.sleep(5)
+
     
     except Exception as e:
         print(f"\nError during demo: {e}")

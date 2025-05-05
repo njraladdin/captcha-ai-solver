@@ -198,7 +198,7 @@ def validate_lnnte_numbers():
     start_time = time.time()
     
     # Set the maximum number of concurrent processes
-    MAX_CONCURRENT = 3
+    MAX_CONCURRENT = 1
     results = {}
     
     # Process phone numbers concurrently using ProcessPoolExecutor
