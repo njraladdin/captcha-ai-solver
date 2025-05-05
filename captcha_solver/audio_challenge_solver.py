@@ -5,7 +5,7 @@ import os
 import requests
 import random
 
-class ChallengeSolver:
+class AudioChallengeSolver:
     """
     A class for solving reCAPTCHA challenges using audio transcription.
     
@@ -38,7 +38,7 @@ class ChallengeSolver:
     
     def __init__(self, wit_api_key=None, download_dir="tmp"):
         """
-        Initialize the ChallengeSolver.
+        Initialize the AudioChallengeSolver.
         
         Args:
             wit_api_key (str, optional): API key for Wit.ai speech recognition service
@@ -594,7 +594,7 @@ class ChallengeSolver:
 if __name__ == "__main__":
     import os
     import sys
-    
+    from seleniumbase import SB
     # Get Wit.ai API key from environment variable or allow user to input it
     wit_api_key = os.environ.get("WIT_API_KEY")
     if not wit_api_key:
@@ -602,8 +602,24 @@ if __name__ == "__main__":
         sys.exit(1)
     
     # Create solver instance
-    print("\n=== Creating ChallengeSolver instance ===")
-    solver = ChallengeSolver(
+    print("\n=== Creating AudioChallengeSolver instance ===")
+    solver = AudioChallengeSolver(
         wit_api_key=wit_api_key,
         download_dir="tmp",
     ) 
+
+
+    # Test the solver
+    print("\n=== Testing AudioChallengeSolver ===")
+    test_url = "https://www.google.com/recaptcha/api2/demo"
+    print(f"Testing on URL: {test_url}")
+
+    # Initialize browser    
+    with SB(uc=True, headless=False) as sb:
+        #go to url 
+        sb.open(test_url)
+        # Test the solver
+        token, success = solver.solve(sb)
+        print(f"--> Solved: {success}")
+        print(f"--> Token: {token[:20]}...")
+    

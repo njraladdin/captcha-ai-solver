@@ -1,50 +1,67 @@
-import pytest
 import os
-import time
-from dotenv import load_dotenv
 import sys
-from pathlib import Path
+import time
 
 # Add the parent directory to the path so we can import the captcha_solver module
-sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from captcha_solver import CaptchaSolver
 
-# Load environment variables from .env file
-load_dotenv()
-
-# Get the Wit.ai API key from environment variables
-WIT_API_KEY = os.getenv('WIT_AI_API_KEY')
-if not WIT_API_KEY:
-    raise ValueError("WIT_AI_API_KEY environment variable not found. Please set it in .env file.")
-
-# Test constants
-RECAPTCHA_DEMO_URL = "https://www.google.com/recaptcha/api2/demo"
-DOWNLOAD_DIR = os.path.join(os.path.dirname(__file__), "tmp")
-
-# Ensure download directory exists
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-def test_solve_google_recaptcha_demo():
-    """Direct test of solving Google's reCAPTCHA demo page."""
-    print("\n=== Testing Google reCAPTCHA Demo Solution ===")
+def test_solve_google_demo_captcha():
+    """
+    Integration test that attempts to solve a real captcha from the Google demo site.
+    This test will:
+    1. Initialize the CaptchaSolver with your Wit.ai API key
+    2. Solve a real captcha from the Google demo site
+    3. Print the results
     
-    # Initialize the solver with the Wit.ai API key
-    solver = CaptchaSolver(wit_api_key=WIT_API_KEY, download_dir=DOWNLOAD_DIR)
+    Note: This requires a valid Wit.ai API key to work properly
+    """
+    print("\n=== Integration Test: Solving Google Demo Captcha ===")
     
-    # Run the workflow without any callbacks
-    # The solver will navigate to the URL and attempt to solve the CAPTCHA
-    token, success = solver.run_workflow(RECAPTCHA_DEMO_URL, observation_time=2)
+    # Get Wit.ai API key from environment variable or use a default for testing
+    # In a real scenario, you should set this environment variable with your actual API key
+    wit_api_key = os.environ.get("WIT_API_KEY", "YOUR_WIT_API_KEY_HERE")
     
-    # Log the results
-    if success:
-        print(f"✅ CAPTCHA SOLVED SUCCESSFULLY!")
-        print(f"Token: {token[:30]}..." if token else "No token")
-    else:
-        print(f"❌ CAPTCHA SOLUTION FAILED")
-        print(f"Token: {token}" if token else "No token")
+    # Initialize the solver
+    solver = CaptchaSolver(wit_api_key=wit_api_key)
     
-    # We don't assert success because network conditions or Google's detection
-    # might make the test fail unpredictably
+    # Test parameters from the Google reCAPTCHA demo site
+    captcha_params = {
+        "website_key": "6Le-wvkSAAAAAPBMRTvw0Q4Muexq9bi0DJwx_mJ-",
+        "website_url": "https://www.google.com/recaptcha/api2/demo",
+        "is_invisible": False,
+        "is_enterprise": False,
+        "data_s_value": None  # This parameter is usually None for standard reCAPTCHA
+    }
+    
+    # Start timer
+    start_time = time.time()
+    
+    # Attempt to solve the captcha
+    print("\nAttempting to solve Google demo captcha...")
+    token, success = solver.solve(captcha_params)
+    
+    # End timer
+    end_time = time.time()
+    duration = end_time - start_time
+    
+    # Print results
+    print("\n=== Results ===")
     print(f"Success: {success}")
-    print("=== Test Complete ===\n") 
+    if token:
+        print(f"Token received (first 30 chars): {token[:30]}...")
+        print(f"Token length: {len(token)} characters")
+    else:
+        print("No token received")
+    
+    print(f"\nSolving took {duration:.2f} seconds")
+    
+    return success, token
+
+if __name__ == "__main__":
+    # Run the integration test
+    success, token = test_solve_google_demo_captcha()
+    
+    # Exit with appropriate status code
+    sys.exit(0 if success else 1) 
