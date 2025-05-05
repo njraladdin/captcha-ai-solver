@@ -7,9 +7,9 @@
 
 - create test for captcha solver (with url directly), done 
 
-
-- implement concurrency options 
+- implement concurrency options, done 
 
 - test with webshare proxy / test with proxy control mobile proxy 
 
+- send request with captcha token instead of going to next page 
 - add lnnte usecase 
