@@ -18,7 +18,7 @@ class CaptchaSolver:
         token, success = solver.solve(params)
         
         # Or with a full workflow using helper classes:
-        from captcha_solver import CaptchaExtractor, TokenApplier
+        from captcha_solver import CaptchaExtractor, TokenSubmitter
         
         extractor = CaptchaExtractor()
         params = extractor.extract_captcha_params(browser)
@@ -26,8 +26,8 @@ class CaptchaSolver:
         solver = CaptchaSolver(wit_api_key="YOUR_API_KEY")
         token, success = solver.solve(params)
         
-        applier = TokenApplier()
-        applier.apply_token(browser, token, params)
+        submitter = TokenSubmitter()
+        submitter.apply_token(browser, token, params)
     """
     
     def __init__(self, wit_api_key=None, download_dir="tmp"):

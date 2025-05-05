@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from captcha_solver import CaptchaSolver, TokenApplier, CaptchaExtractor
+from captcha_solver import CaptchaSolver, TokenSubmitter, CaptchaExtractor
 from seleniumbase import SB
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -157,8 +157,8 @@ def process_phone_number(phone_number):
             # If we have a token, apply it to the original page
             if captcha_solved_successfully and recaptcha_token:
                 process_print(f"[{phone_number}] Applying token to original page...")
-                applier = TokenApplier(download_dir=TMP_DIR)
-                token_applied = applier.apply_token(sb, recaptcha_token, params)
+                submitter = TokenSubmitter(download_dir=TMP_DIR)
+                token_applied = submitter.apply_token(sb, recaptcha_token, params)
                 
                 if not token_applied:
                     process_print(f"[{phone_number}] Failed to apply token. Trying direct submission anyway.")

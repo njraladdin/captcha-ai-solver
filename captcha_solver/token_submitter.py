@@ -3,7 +3,7 @@ import time
 import json
 
 
-class TokenApplier:
+class TokenSubmitter:
     """
     A class for applying solved reCAPTCHA tokens to the original captcha.
     
@@ -15,7 +15,7 @@ class TokenApplier:
     """
     
     def __init__(self, download_dir="tmp"):
-        """Initialize the TokenApplier."""
+        """Initialize the TokenSubmitter."""
         self.download_dir = download_dir
         
         # Ensure the download directory exists
@@ -709,7 +709,7 @@ if __name__ == "__main__":
     # This is just a demonstration - you'd typically get a real token from a solving service
     dummy_token = "03AFcWeA40GxgGLv7AOWLA7apiMvR6zVc36soHi3fuNqfW_yq9RT6mY7gZGSBwniSlbF9p99TbVGNskOdPNfeJ3x8ro2rqWJxI-kqUxefVarJVPDWrbT1re_tW709vZ5ba7QN6jmY6zp7YTQHeFFH3qTh8TLK85AM_5ZpA3FZmA5_09mRPRCYCl3G-gwmd7xR0fx8lCrcK6p4jiPqEzvvGAn0LqYhpDP8Fvxha-Bz1arvMD48Wamd3SI5NleDMZJggWqLUPxdv0RTQeRKhalFdGnh5bDfPt5gwuihaXdrruAjwrgBpxFXBLoo8WfEhcQlDNrBe3pDkuN5Q7aQYrtar29uCAtPwuNcmdQhpc7bdh0uN5uZWpXPv2Ifir0i-lficFj-0K2NMM7r_46xSvdYn76mt0AWfAFaW98gGgu2g00Y-IjYrjUxzYLVXiBqM_pPjJn3Zuwp6T9KmZs1c0NEloYgarVSKLM067bVvGBlV0VfkY7lEqcF-oFxLX6a_jvv_oMCdgBGhDKG8a8ZogD6Mhe6ATNMN2kvwcrdG6mPSYVGia7uHMcHWskJWEmEEPSy3c6xZs4esQlOcDL3mDWG7fkoAw7cYmr6_A5GYBGP0DHMzAapC507S60rZZLvmH78eupd-BqzUDs1EG23ubWXlk1NmYy3IOxKxu6AmTz-KkrLr3TZYmSEHVS_unGzSODOk8byl70z5tLPA4JHEJa4UbUq75_13tXtLz6F8tqWo35L6Z-IWKKu8eBkQqXp7tY7lxi-FZDXwDkDerg0duzigllQKJkp5crqhkycxXRl_qnq77zI111kxUMj6WuiYAhnkIK7UO1LafFGsA38tPNvxOHsWjRP_FDl_srqk5aQzMu0pVawFFfwF1v74oBKBQ6v7Gs281gtI1WC7epNGXAkNJjX-y11NfHYTUB3cVcoz0vRXsWp9C_aV5tPSxAXINp-Tp_ysPSbWCHPawkxGb9B8i6-5g0IuEIzNSEPWMsUpIkZEzHhMf0iGeHKWGaPxbxICi8BTMVTUzY2ZipT9_F4rZfivSssmhMXRFiAV7CoG-LJDCqBxDYOuZYPQKqHIt5LIh9er5w4cgvm_tnUiOiUOWQz_5hmn9ryu_4V_pzzvqBWO-gNAhc_ommW5RwkvrgwUsj7_0fdPyn79h94DkAoKDqIgqD5WB2Tckq28PjoOtgUwrF6kd8jWwVWym3-zbxcQ3YOTXxP34UYijRrsMcdfXcx2Z0gg0ePJUDGxybQM5-Cl__wlW5HIG0ZgM69qH47AAdkOf1DnQ3DT3j9n8vQISh83210JZbrLAcFjfXoRnWcarBdGCftoe1k03SvrfbM_lGRpyjWjLOWVNkPmEVDf8y7Iey1KmtXtc75tmVqNmQcO9vSSvJYfx5ZR65eK_si2lyLTO0WPqhtSlJtmXxNR2ELufFraKm2vAmsaH83Q3oo_KdcYYZUTrvsxlPJwj9BbdVXuZo3mKUog56fSNOhVVvl88hBXM-tVfDW_ChXE8l1iVl27_g_yD9XmYg1Hw3rSdvESBkEEeSZncZhOygys4ZTs9qG9cR9gREkqxAnx_yOD92SoG3b6toGT2FHJoRJVRKCv3tfvUtygRa20Ve9jK_2smfmbc3aQ3aMc7wuv79L3WHrtIyrsNiix2oasvvNS0DS9XZHYQXAeNDfuuPStHdDtuy-dntqTzW4Dj8KeAfo0TJUVdiY7H4Iu7dYG2lumhGoogAgXw8sJcfPe9bBDvOxjEQzJc2iBfefQ8rAMTcdCz1yZDICjOKoxvKggl2Ue8NPwg04b3G3sRjyRQN-5heZTH4iiI2iWv58PkBO6BfH6w1ckLUQMwYCGO5vNTVE_PbH00dtVNCELmPXEChBqaFXJn4QS70pdgNxxi1w1dpzFysXpDMHAxX46wNAxQax4sFbEN4l4qp_0ypP8iLMFp6iXPg3BWMS-SuzmkicKffwtzyXaSRoiaDICrv9EvmI_lSTgA3hcsvNzv3W2sgCNbfLiRRZb0YrYMw"
     
-    print("\n=== Token Applier Demo ===")
+    print("\n=== Token Submitter Demo ===")
     print("This demo will attempt to apply a dummy token to a reCAPTCHA on a demo page.")
     print("For an actual implementation, you would use a real token from a solving service.")
     
@@ -723,17 +723,17 @@ if __name__ == "__main__":
             # Wait for page to load
             sb.sleep(2)
             
-            # Create token applier
-            applier = TokenApplier(download_dir="tmp")
+            # Create token submitter
+            submitter = TokenSubmitter(download_dir="tmp")
             
             # Apply the dummy token and submit the form
-            success = applier.apply_token(sb, dummy_token, submit_form=True)
+            success = submitter.apply_token(sb, dummy_token, submit_form=True)
             
             if success:
                 print("\n✅ Token application process completed successfully")
                 
                 # Verify token application
-                verification = applier.verify_token_application(sb)
+                verification = submitter.verify_token_application(sb)
                 if verification:
                     print("\n✅ Token verification successful")
                 else:

@@ -13,7 +13,7 @@ import sys
 import time
 import os
 from seleniumbase import SB
-from captcha_solver import CaptchaSolver, CaptchaExtractor, CaptchaReplicator, ChallengeSolver, TokenApplier
+from captcha_solver import CaptchaSolver, CaptchaExtractor, CaptchaReplicator, ChallengeSolver, TokenSubmitter
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -97,7 +97,7 @@ def demo_detailed_approach():
     # Create instances of all component classes
     extractor = CaptchaExtractor(download_dir="tmp")
     solver = CaptchaSolver(wit_api_key=wit_api_key, download_dir="tmp")
-    applier = TokenApplier(download_dir="tmp")
+    submitter = TokenSubmitter(download_dir="tmp")
 
     # Initialize original browser that will be kept open throughout the process
     browser = None
@@ -145,13 +145,13 @@ def demo_detailed_approach():
             print("\n=== Step 3: Applying Solved Token to Original Page ===")
 
             # Apply the token to the original reCAPTCHA
-            success = applier.apply_token(sb, token, params, submit_form=True)
+            success = submitter.apply_token(sb, token, params, submit_form=True)
 
             if success:
                 print("\n✅ Token application successful!")
 
                 # Verify token application
-                verification = applier.verify_token_application(sb)
+                verification = submitter.verify_token_application(sb)
                 if verification:
                     print("✅ Token verification successful")
                 else:
