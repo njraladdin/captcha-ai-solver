@@ -335,30 +335,42 @@ class CaptchaReplicator:
             self.server_thread = None
             self.flask_app = None
     
-    def replicate_captcha(self, website_key, website_url, is_invisible=False, data_s_value=None, 
+    def replicate_captcha(self, website_key, website_url, browser=None, is_invisible=False, data_s_value=None, 
                           is_enterprise=False, api_domain="google.com", user_agent=None, 
-                          cookies=None, observation_time=1):
+                          cookies=None, observation_time=5):
         """
         Create and display a replicated reCAPTCHA challenge.
         
         Args:
             website_key (str): reCAPTCHA sitekey
             website_url (str): The URL of the target website
+            browser (SB, optional): Existing SeleniumBase browser instance to use. If None, a new browser
+                                   will be created automatically. Defaults to None.
             is_invisible (bool, optional): Whether to use invisible reCAPTCHA. Defaults to False.
             data_s_value (str, optional): The value of data-s parameter. Defaults to None.
             is_enterprise (bool, optional): Whether to use Enterprise reCAPTCHA. Defaults to False.
             api_domain (str, optional): Domain to load captcha from. Defaults to "google.com".
             user_agent (str, optional): User agent to use. Defaults to None.
             cookies (list, optional): Cookies to set. Defaults to None.
-            observation_time (int, optional): Time to keep browser open. Defaults to 100.
-                                           Set to 0 to keep open until closed manually.
+            observation_time (int, optional): Time to keep browser open in seconds. Defaults to 5.
+                                           Set to 0 to keep open until closed manually or token received.
         
         Returns:
-            tuple: (Path to the HTML file, browser instance, last captured token)
+            tuple: If browser was provided: (html_path, token)
+                  If browser was created internally: (html_path, browser, token)
         """
+        should_return_browser = False
+        sb = None
+        
         try:
             # Reset the last token
             self.last_token = None
+            
+            # Extract the original domain for reference only
+            original_domain = None
+            if website_url:
+                parsed_url = urlparse(website_url)
+                original_domain = parsed_url.netloc
             
             # Select appropriate API domain for Enterprise reCAPTCHA
             if is_enterprise and not api_domain.endswith('enterprise'):
@@ -380,85 +392,130 @@ class CaptchaReplicator:
             server_port = self.start_http_server()
             if not server_port:
                 print("Failed to start HTTP server")
-                return None, None, None
+                return (None, None) if browser else (None, None, None)
             
-            # Form URL to the HTML file (with proper http:// prefix)
+            # Form URL to the HTML file
             file_basename = os.path.basename(html_path)
             local_file_url = f"http://localhost:{server_port}/{file_basename}"
-            print(f"Replicated reCAPTCHA URL: {local_file_url}")
+            print(f"Using localhost URL: {local_file_url}")
             
-            # Initialize browser
-            browser = self.initialize_browser(uc=True)
-            self.browser = browser
-            
-            with browser as sb:
-                # Navigate to the HTML page
-                sb.open(local_file_url)
+            # Determine if we need to create a browser or use the provided one
+            if browser is None:
+                # Create a new browser instance
+                browser_instance = self.initialize_browser(uc=True)
+                self.browser = browser_instance
+                should_return_browser = True
                 
-                # Set user agent if specified
-                if user_agent:
-                    sb.execute_script(f"Object.defineProperty(navigator, 'userAgent', " + 
-                                     f"{{get: function() {{return '{user_agent}'}}}});")
-                
-                # Set cookies if specified
-                if cookies:
-                    for cookie in cookies:
-                        sb.add_cookie(cookie)
-                
-                # Check if reCAPTCHA loads properly or has domain error
-                try:
-                    # Wait for either the reCAPTCHA iframe or error message
-                    sb.wait_for_element_present("iframe[src*='recaptcha']", timeout=10)
-                    print("reCAPTCHA iframe loaded successfully")
+                # Use context manager for the browser we created
+                with browser_instance as sb:
+                    result = self._handle_captcha_interaction(
+                        sb, local_file_url, user_agent, cookies, 
+                        observation_time
+                    )
                     
-                except (NoSuchElementException, TimeoutException):
-                    try:
-                        # Check for domain error message
-                        error_element = sb.find_element("div#error-message")
-                        if error_element:
-                            print(f"Error: {error_element.text}")
-                            print("This may be due to domain restrictions on the reCAPTCHA site key.")
-                    except:
-                        print("reCAPTCHA failed to load but no specific error was found")
+                    # Return appropriate tuple format based on browser creation
+                    return html_path, browser_instance, self.last_token
+            else:
+                # Use the provided browser instance
+                self.browser = browser
+                sb = browser
+                result = self._handle_captcha_interaction(
+                    sb, local_file_url, user_agent, cookies, 
+                    observation_time
+                )
                 
-                # Start a thread to monitor for token updates
-                self._start_token_monitor(sb)
-                    
-                if observation_time > 0:
-                    # Keep the window open for the specified time
-                    print(f"Keeping browser open for {observation_time} seconds...")
-                    sb.sleep(observation_time)
-                else:
-                    # Keep the window open until manually closed
-                    print("Browser will remain open until manually closed or token is received...")
-                    while True:
-                        # Check if browser is still open
-                        try:
-                            # Get the current URL to check if browser is still open
-                            current_url = sb.get_current_url()
-                            
-                            # Check if we have a token
-                            if self.last_token:
-                                token = self.last_token
-                                print(f"Token received, length: {len(token)}")
-                                print("You can close the browser window now, or it will close automatically in 5 seconds...")
-                                sb.sleep(5)
-                                break
-                            
-                            # Brief pause to avoid high CPU usage
-                            sb.sleep(1)
-                        except:
-                            # Browser was closed by user
-                            print("Browser was closed by user")
-                            break
-                
-                return html_path, browser, self.last_token
+                # Return appropriate tuple format when browser was provided
+                return html_path, self.last_token
         
         except Exception as e:
             print(f"Error in replicate_captcha: {e}")
+            import traceback
+            traceback.print_exc()
             self.stop_http_server()
-            return None, None, None
-
+            return (None, None) if browser else (None, None, None)
+    
+    def _handle_captcha_interaction(self, sb, local_file_url, user_agent=None, 
+                                   cookies=None, observation_time=5):
+        """
+        Handle the interaction with the captcha in the browser.
+        
+        Args:
+            sb: SeleniumBase browser instance
+            local_file_url: URL to the captcha HTML file
+            user_agent: User agent to set (optional)
+            cookies: Cookies to set (optional)
+            observation_time: Time to keep browser open
+            
+        Returns:
+            bool: Success status
+        """
+        try:
+            # Navigate to the HTML page
+            sb.open(local_file_url)
+            
+            # Set user agent if specified
+            if user_agent:
+                sb.execute_script(f"Object.defineProperty(navigator, 'userAgent', " + 
+                                 f"{{get: function() {{return '{user_agent}'}}}});")
+            
+            # Set cookies if specified
+            if cookies:
+                for cookie in cookies:
+                    sb.add_cookie(cookie)
+            
+            # Check if reCAPTCHA loads properly or has domain error
+            try:
+                # Wait for either the reCAPTCHA iframe or error message
+                sb.wait_for_element_present("iframe[src*='recaptcha']", timeout=10)
+                print("reCAPTCHA iframe loaded successfully")
+                
+            except (NoSuchElementException, TimeoutException):
+                try:
+                    # Check for domain error message
+                    error_element = sb.find_element("div#error-message")
+                    if error_element:
+                        print(f"Error: {error_element.text}")
+                        print("This may be due to domain restrictions on the reCAPTCHA site key.")
+                except:
+                    print("reCAPTCHA failed to load but no specific error was found")
+            
+            # Start a thread to monitor for token updates
+            self._start_token_monitor(sb)
+                
+            if observation_time > 0:
+                # Keep the window open for the specified time
+                print(f"Keeping browser open for {observation_time} seconds...")
+                sb.sleep(observation_time)
+            else:
+                # Keep the window open until manually closed or token is received
+                print("Browser will remain open until manually closed or token is received...")
+                while True:
+                    # Check if browser is still open
+                    try:
+                        # Get the current URL to check if browser is still open
+                        current_url = sb.get_current_url()
+                        
+                        # Check if we have a token
+                        if self.last_token:
+                            token = self.last_token
+                            print(f"Token received, length: {len(token)}")
+                            print("You can close the browser window now, or it will close automatically in 5 seconds...")
+                            sb.sleep(5)
+                            break
+                        
+                        # Brief pause to avoid high CPU usage
+                        sb.sleep(1)
+                    except:
+                        # Browser was closed by user
+                        print("Browser was closed by user")
+                        break
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error in _handle_captcha_interaction: {e}")
+            return False
+    
     def _start_token_monitor(self, sb):
         """
         Start a background thread to monitor for token updates.
@@ -521,107 +578,6 @@ class CaptchaReplicator:
         """
         return self.last_token
 
-    def setup_captcha(self, sb, website_key, website_url, is_invisible=False, data_s_value=None, 
-                    is_enterprise=False, api_domain="google.com", user_agent=None, 
-                    cookies=None, observation_time=5):
-        """
-        Set up a replicated reCAPTCHA challenge using an existing browser instance.
-        
-        Args:
-            sb: Existing SeleniumBase browser instance to use
-            website_key (str): reCAPTCHA sitekey
-            website_url (str): The URL of the target website
-            is_invisible (bool, optional): Whether to use invisible reCAPTCHA. Defaults to False.
-            data_s_value (str, optional): The value of data-s parameter. Defaults to None.
-            is_enterprise (bool, optional): Whether to use Enterprise reCAPTCHA. Defaults to False.
-            api_domain (str, optional): Domain to load captcha from. Defaults to "google.com".
-            user_agent (str, optional): User agent to use. Defaults to None.
-            cookies (list, optional): Cookies to set. Defaults to None.
-            observation_time (int, optional): Time to keep browser open. Defaults to 5.
-        
-        Returns:
-            tuple: (Path to the HTML file, last captured token)
-        """
-        try:
-            # Reset the last token
-            self.last_token = None
-            
-            # Select appropriate API domain for Enterprise reCAPTCHA
-            if is_enterprise and not api_domain.endswith('enterprise'):
-                if api_domain == "google.com":
-                    api_domain = "www.google.com/recaptcha/enterprise"
-                elif api_domain == "recaptcha.net":
-                    api_domain = "recaptcha.net/recaptcha/enterprise"
-            
-            # Create HTML file with appropriate challenge type
-            html_path = self.create_captcha_html(
-                website_key, 
-                website_url, 
-                is_invisible=is_invisible,
-                data_s_value=data_s_value,
-                api_domain=api_domain
-            )
-            
-            # Start HTTP server
-            server_port = self.start_http_server()
-            if not server_port:
-                print("Failed to start HTTP server")
-                return None, None
-            
-            # Form URL to the HTML file (with proper http:// prefix)
-            file_basename = os.path.basename(html_path)
-            local_file_url = f"http://localhost:{server_port}/{file_basename}"
-            print(f"Replicated reCAPTCHA URL: {local_file_url}")
-            
-            # Store reference to the browser
-            self.browser = sb
-            
-            # Navigate to the HTML page
-            sb.open(local_file_url)
-            
-            # Set user agent if specified
-            if user_agent:
-                sb.execute_script(f"Object.defineProperty(navigator, 'userAgent', " + 
-                                  f"{{get: function() {{return '{user_agent}'}}}});")
-            
-            # Set cookies if specified
-            if cookies:
-                for cookie in cookies:
-                    sb.add_cookie(cookie)
-            
-            # Check if reCAPTCHA loads properly or has domain error
-            try:
-                # Wait for either the reCAPTCHA iframe or error message
-                sb.wait_for_element_present("iframe[src*='recaptcha']", timeout=10)
-                print("reCAPTCHA iframe loaded successfully")
-                
-            except (NoSuchElementException, TimeoutException):
-                try:
-                    # Check for domain error message
-                    error_element = sb.find_element("div#error-message")
-                    if error_element:
-                        print(f"Error: {error_element.text}")
-                        print("This may be due to domain restrictions on the reCAPTCHA site key.")
-                except:
-                    print("reCAPTCHA failed to load but no specific error was found")
-            
-            # Start a thread to monitor for token updates
-            self._start_token_monitor(sb)
-                
-            if observation_time > 0:
-                # Keep the window open for the specified time
-                print(f"Keeping browser open for {observation_time} seconds...")
-                sb.sleep(observation_time)
-            
-            return html_path, self.last_token
-        
-        except Exception as e:
-            print(f"Error in setup_captcha: {e}")
-            import traceback
-            traceback.print_exc()
-            self.stop_http_server()
-            return None, None
-
 
 # Simple example usage
 if __name__ == "__main__":
@@ -642,10 +598,11 @@ if __name__ == "__main__":
         print("Browser will stay open for 100 seconds by default (or until manually closed).")
         
         try:
-            # Replicate the captcha
+            # Replicate the captcha (passing browser=None to create a new browser)
             html_path, browser, token = captcha_replicator.replicate_captcha(
                 website_key=website_key,
-                website_url=website_url
+                website_url=website_url,
+                observation_time=100  # Keep open longer for demonstration
             )
             
             if not html_path or not browser:

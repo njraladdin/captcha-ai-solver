@@ -6,7 +6,7 @@ from .audio_challenge_solver import AudioChallengeSolver
 
 
 # it receives captcha params, outputs solve token 
-# the audio challenge solver receives a browser instance with the captcha page loaded
+# the audio challenge solver receives a browser instance with the emulated captcha page loaded
 class CaptchaSolver:
     """
     Main entry point for solving reCAPTCHAs.
@@ -89,10 +89,10 @@ class CaptchaSolver:
                 
                 # Set up the captcha in the browser
                 print("\n--- Step 2: Setting up reCAPTCHA ---")
-                html_path, initial_token = self.replicator.setup_captcha(
-                    sb=browser,
+                html_path, initial_token = self.replicator.replicate_captcha(
                     website_key=params["website_key"],
                     website_url=params["website_url"],
+                    browser=browser,
                     is_invisible=params.get("is_invisible", False),
                     data_s_value=params.get("data_s_value"),
                     is_enterprise=params.get("is_enterprise", False),
