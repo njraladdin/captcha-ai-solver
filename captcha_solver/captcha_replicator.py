@@ -122,21 +122,6 @@ class CaptchaReplicator:
         except Exception as e:
             print(f"Error cleaning up certificate files: {e}")
     
-    def initialize_browser(self, uc=True, headless=False, **kwargs):
-        """
-        Initialize a SeleniumBase browser instance.
-        
-        Args:
-            uc (bool, optional): Use undetected-chromedriver mode. Defaults to True.
-            headless (bool, optional): Run browser in headless mode. Defaults to False.
-            **kwargs: Additional keyword arguments to pass to SeleniumBase constructor.
-            
-        Returns:
-            SB: The initialized SeleniumBase browser class for use with 'with' statement.
-        """
-        print("Initializing SeleniumBase browser...")
-        return SB(uc=uc, headless=headless, **kwargs)
-    
     def create_captcha_html(self, website_key, website_url, is_invisible=False, data_s_value=None, api_domain="google.com"):
         """
         Create an HTML page with the reCAPTCHA widget for the given parameters.
@@ -456,7 +441,7 @@ class CaptchaReplicator:
             self.server_thread = None
             self.flask_app = None
     
-    def replicate_captcha(self, website_key, website_url, browser=None, is_invisible=False, data_s_value=None, 
+    def replicate_captcha(self, website_key, website_url, browser, is_invisible=False, data_s_value=None, 
                           is_enterprise=False, api_domain="google.com", user_agent=None, 
                           cookies=None, observation_time=5, bypass_domain_check=False, use_ssl=True):
         """
@@ -465,8 +450,7 @@ class CaptchaReplicator:
         Args:
             website_key (str): reCAPTCHA sitekey
             website_url (str): The URL of the target website
-            browser (SB, optional): Existing SeleniumBase browser instance to use. If None, a new browser
-                                   will be created automatically. Defaults to None.
+            browser (SB): SeleniumBase browser instance to use
             is_invisible (bool, optional): Whether to use invisible reCAPTCHA. Defaults to False.
             data_s_value (str, optional): The value of data-s parameter. Defaults to None.
             is_enterprise (bool, optional): Whether to use Enterprise reCAPTCHA. Defaults to False.
@@ -479,10 +463,8 @@ class CaptchaReplicator:
             use_ssl (bool, optional): Whether to use SSL (HTTPS). Defaults to True.
         
         Returns:
-            tuple: If browser was provided: (html_path, token)
-                  If browser was created internally: (html_path, browser, token)
+            tuple: (html_path, token)
         """
-        should_return_browser = False
         sb = None
         domain_added = False
         original_domain = None
@@ -532,7 +514,7 @@ class CaptchaReplicator:
             server_port = self.start_http_server(domain=original_domain, use_ssl=use_ssl)
             if not server_port:
                 print("Failed to start HTTP server")
-                return (None, None) if browser else (None, None, None)
+                return None, None
             
             # Form URL to the HTML file
             file_basename = os.path.basename(html_path)
@@ -570,49 +552,28 @@ class CaptchaReplicator:
                 local_file_url = f"{protocol}://localhost:{self.server_port}/{file_basename}"
                 print(f"Using localhost URL: {local_file_url}")
             
-            # Determine if we need to create a browser or use the provided one
-            if browser is None:
-                # Create a new browser instance
-                browser_instance = self.initialize_browser(uc=True)
-                self.browser = browser_instance
-                should_return_browser = True
-                
-                # Use context manager for the browser we created
-                with browser_instance as sb:
-                    # Add option to ignore SSL certificate errors
-                    if use_ssl:
-                        sb.driver.execute_cdp_cmd("Security.setIgnoreCertificateErrors", {"ignore": True})
-                    
-                    result = self._handle_captcha_interaction(
-                        sb, local_file_url, user_agent, cookies, 
-                        observation_time
-                    )
-                    
-                    # Return appropriate tuple format based on browser creation
-                    return html_path, browser_instance, self.last_token
-            else:
-                # Use the provided browser instance
-                self.browser = browser
-                sb = browser
-                
-                # Add option to ignore SSL certificate errors
-                if use_ssl:
-                    sb.driver.execute_cdp_cmd("Security.setIgnoreCertificateErrors", {"ignore": True})
-                
-                result = self._handle_captcha_interaction(
-                    sb, local_file_url, user_agent, cookies, 
-                    observation_time
-                )
-                
-                # Return appropriate tuple format when browser was provided
-                return html_path, self.last_token
+            # Store the browser reference
+            self.browser = browser
+            sb = browser
+            
+            # Add option to ignore SSL certificate errors
+            if use_ssl:
+                sb.driver.execute_cdp_cmd("Security.setIgnoreCertificateErrors", {"ignore": True})
+            
+            result = self._handle_captcha_interaction(
+                sb, local_file_url, user_agent, cookies, 
+                observation_time
+            )
+            
+            # Return the results
+            return html_path, self.last_token
         
         except Exception as e:
             print(f"Error in replicate_captcha: {e}")
             import traceback
             traceback.print_exc()
             self.stop_http_server()
-            return (None, None) if browser else (None, None, None)
+            return None, None
         finally:
             # Clean up hosts file if we added a domain
             if domain_added and original_domain:
@@ -785,18 +746,24 @@ if __name__ == "__main__":
         print(f"Opening replicated reCAPTCHA with sitekey: {website_key}")
         print("Browser will stay open for 100 seconds by default (or until manually closed).")
         
-        try:
-            # Replicate the captcha (passing browser=None to create a new browser)
-            # Set bypass_domain_check to True to test the hosts file functionality
-            html_path, browser, token = captcha_replicator.replicate_captcha(
+        # Create browser directly using SB, same as in captcha_solver.py
+        print("\n--- Step 1: Creating browser instance ---")
+        
+        # Create and use a SeleniumBase browser with a context manager
+        with SB(uc=True, headless=False) as browser:
+            print(f"Browser instance created: {type(browser)}")
+            
+            # Replicate the captcha with the provided browser
+            html_path, token = captcha_replicator.replicate_captcha(
                 website_key=website_key,
                 website_url=website_url,
+                browser=browser,
                 observation_time=100,  # Keep open longer for demonstration
                 bypass_domain_check=True,  # Enable hosts file bypass
                 use_ssl=True  # Use SSL with self-signed certificate
             )
             
-            if not html_path or not browser:
+            if not html_path:
                 print("Failed to start reCAPTCHA session. See error messages above.")
                 captcha_replicator.stop_http_server()
                 exit(1)
@@ -812,15 +779,15 @@ if __name__ == "__main__":
                 
             # This point is reached only after browser is closed or timeout
             print("\n=== Completed replicated CAPTCHA session ===")
-            
-        except KeyboardInterrupt:
-            print("\nTest interrupted by user. Exiting...")
-            # Ensure server is stopped
-            captcha_replicator.stop_http_server()
-        except Exception as e:
-            print(f"\nUnexpected error during test: {e}")
-            # Ensure server is stopped
-            captcha_replicator.stop_http_server()
+        
+    except KeyboardInterrupt:
+        print("\nTest interrupted by user. Exiting...")
+        # Ensure server is stopped
+        captcha_replicator.stop_http_server()
+    except Exception as e:
+        print(f"\nUnexpected error during test: {e}")
+        # Ensure server is stopped
+        captcha_replicator.stop_http_server()
     finally:
         # Ensure any lingering servers are stopped
         try:
