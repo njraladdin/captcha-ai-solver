@@ -11,7 +11,7 @@ import flask
 import logging
 from flask import Flask, send_from_directory
 import requests
-import hosts_manager  # Import hosts_manager module directly
+from . import hosts_manager  # Changed to relative import
 import ssl
 import tempfile
 import subprocess

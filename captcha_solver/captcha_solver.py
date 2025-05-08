@@ -96,7 +96,11 @@ class CaptchaSolver:
                     is_invisible=params.get("is_invisible", False),
                     data_s_value=params.get("data_s_value"),
                     is_enterprise=params.get("is_enterprise", False),
-                    observation_time=5  # Just enough time to load the CAPTCHA
+                    observation_time=5,  # Just enough time to load the CAPTCHA
+
+                    bypass_domain_check=True,  # Enable hosts file bypass
+                    use_ssl=True  # Use SSL with self-signed certificate
+
                 )
                 
                 # If we couldn't set up the captcha
