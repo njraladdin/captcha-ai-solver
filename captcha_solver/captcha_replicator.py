@@ -11,6 +11,11 @@ import flask
 import logging
 from flask import Flask, send_from_directory
 import requests
+import hosts_manager  # Import hosts_manager module directly
+import ssl
+import tempfile
+import subprocess
+from OpenSSL import crypto
 
 
 class CaptchaReplicator:
@@ -22,7 +27,7 @@ class CaptchaReplicator:
     the reCAPTCHA challenge and displays it in a browser.
     """
     
-    def __init__(self, download_dir="tmp", server_port=8000):
+    def __init__(self, download_dir="tmp", server_port=8080):
         """
         Initialize the CaptchaReplicator.
         
@@ -30,7 +35,7 @@ class CaptchaReplicator:
             download_dir (str, optional): Directory where HTML files will be saved.
                                          Defaults to 'tmp' directory.
             server_port (int, optional): Port to use for the local HTTP server.
-                                        Defaults to 8000.
+                                        Defaults to 8080 (will be forwarded to 443 with admin rights).
         """
         self.download_dir = download_dir
         self.server_port = server_port
@@ -39,9 +44,83 @@ class CaptchaReplicator:
         self.flask_app = None
         self.browser = None
         self.last_token = None  # Store the last solved token
+        self.port_forwarding_enabled = False  # Track if port forwarding is active
+        self.cert_file = None
+        self.key_file = None
         
         # Ensure the download directory exists
         os.makedirs(self.download_dir, exist_ok=True)
+    
+    def _create_self_signed_cert(self, domain):
+        """
+        Create a self-signed SSL certificate for the domain.
+        
+        Args:
+            domain (str): The domain to create the certificate for
+            
+        Returns:
+            tuple: (cert_file_path, key_file_path) or (None, None) if failed
+        """
+        try:
+            # Create a key pair
+            k = crypto.PKey()
+            k.generate_key(crypto.TYPE_RSA, 2048)
+            
+            # Create a self-signed cert
+            cert = crypto.X509()
+            cert.get_subject().C = "US"
+            cert.get_subject().ST = "State"
+            cert.get_subject().L = "City"
+            cert.get_subject().O = "Organization"
+            cert.get_subject().OU = "Organizational Unit"
+            cert.get_subject().CN = domain
+            
+            # Add SubjectAltName for the domain and its www version
+            san_extension = crypto.X509Extension(
+                b"subjectAltName", 
+                False, 
+                f"DNS:{domain}, DNS:www.{domain}".encode()
+            )
+            cert.add_extensions([san_extension])
+            
+            cert.set_serial_number(int(time.time() * 1000))
+            cert.gmtime_adj_notBefore(0)
+            cert.gmtime_adj_notAfter(10*365*24*60*60)  # 10 years
+            cert.set_issuer(cert.get_subject())
+            cert.set_pubkey(k)
+            cert.sign(k, 'sha256')
+            
+            # Write certificate and key to files in temp directory
+            cert_file = tempfile.NamedTemporaryFile(delete=False, suffix='.crt')
+            key_file = tempfile.NamedTemporaryFile(delete=False, suffix='.key')
+            
+            cert_file.write(crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
+            key_file.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+            
+            cert_file.close()
+            key_file.close()
+            
+            print(f"Created self-signed certificate for {domain}")
+            
+            return cert_file.name, key_file.name
+            
+        except Exception as e:
+            print(f"Error creating self-signed certificate: {e}")
+            return None, None
+            
+    def _cleanup_cert_files(self):
+        """Clean up temporary certificate files."""
+        try:
+            if self.cert_file and os.path.exists(self.cert_file):
+                os.unlink(self.cert_file)
+                self.cert_file = None
+            
+            if self.key_file and os.path.exists(self.key_file):
+                os.unlink(self.key_file)
+                self.key_file = None
+                
+        except Exception as e:
+            print(f"Error cleaning up certificate files: {e}")
     
     def initialize_browser(self, uc=True, headless=False, **kwargs):
         """
@@ -90,59 +169,61 @@ class CaptchaReplicator:
 <html>
 <head>
     <title>Replicated reCAPTCHA Challenge</title>
-    <script src="https://{api_domain}/recaptcha/api.js" async defer></script>
+    <script src="//www.{api_domain}/recaptcha/api.js" async defer></script>
     <style>
-        body {{
-            font-family: Arial, sans-serif;
-            text-align: center;
-            margin: 50px;
-        }}
-        .container {{
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-            border: 1px solid #e0e0e0;
-            border-radius: 5px;
-        }}
-        .info {{
-            margin-bottom: 20px;
-            color: #666;
-            font-size: 14px;
-        }}
-        .captcha-container {{
-            display: flex;
-            justify-content: center;
-            margin: 20px 0;
-        }}
-        .token-display {{
-            margin-top: 20px;
-            padding: 10px;
-            background-color: #f7f7f7;
-            border: 1px solid #ddd;
-            border-radius: 3px;
-            text-align: left;
-            word-break: break-all;
-        }}
-        button {{
-            padding: 8px 16px;
-            background-color: #4285f4;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }}
-        button:hover {{
-            background-color: #357ae8;
-        }}
-        .note {{
-            margin-top: 10px;
-            font-size: 12px;
-            color: #999;
-        }}
-        .error {{
-            color: #e53935;
-            margin-top: 10px;
-        }}
+    body {{
+        font-family: Arial, sans-serif;
+        margin: 20px;
+        line-height: 1.6;
+    }}
+    .container {{
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 20px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+    }}
+    .info {{
+        background-color: #f9f9f9;
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }}
+    .captcha-container {{
+        margin: 20px 0;
+    }}
+    .token-display {{
+        background-color: #f5f5f5;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        word-break: break-all;
+        margin: 10px 0;
+        max-height: 100px;
+        overflow-y: auto;
+        font-family: monospace;
+        font-size: 12px;
+    }}
+    button {{
+        padding: 8px 15px;
+        background-color: #4285f4;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin: 10px 0;
+    }}
+    button:hover {{
+        background-color: #3367d6;
+    }}
+    .error {{
+        color: red;
+        margin: 10px 0;
+    }}
+    .note {{
+        font-size: 0.9em;
+        color: #666;
+    }}
     </style>
     <script>
         function onCaptchaSuccess(token) {{
@@ -250,18 +331,50 @@ class CaptchaReplicator:
             s.bind(('', 0))
             return s.getsockname()[1]
     
-    def start_http_server(self):
+    def start_http_server(self, domain=None, use_ssl=True):
         """
         Start a Flask HTTP server in a separate thread.
-        Returns the port number on which the server is running.
+        If admin privileges are available, set up port forwarding to port 443 for HTTPS.
+        
+        Args:
+            domain (str, optional): Domain to create SSL certificate for
+            use_ssl (bool, optional): Whether to use SSL (HTTPS). Defaults to True.
+            
+        Returns:
+            int: The port number on which the server is running.
         """
-        # Use a free port if the specified one is taken
+        # Find an available port to use
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(('localhost', self.server_port))
+                s.bind(('0.0.0.0', self.server_port))
         except OSError:
             print(f"Port {self.server_port} is in use. Finding an available port...")
             self.server_port = self._get_free_port()
+        
+        ssl_context = None
+        
+        # If using SSL and domain is provided, create self-signed certificate
+        if use_ssl and domain:
+            print(f"Setting up SSL with self-signed certificate for {domain}...")
+            self.cert_file, self.key_file = self._create_self_signed_cert(domain)
+            
+            if self.cert_file and self.key_file:
+                ssl_context = (self.cert_file, self.key_file)
+                target_port = 443  # HTTPS port
+            else:
+                print("Failed to create SSL certificate. Falling back to HTTP.")
+                use_ssl = False
+                target_port = 80  # HTTP port
+        else:
+            target_port = 80  # Default HTTP port if not using SSL
+        
+        # If we have admin rights, try to set up port forwarding
+        if hosts_manager.is_admin():
+            print(f"Attempting to set up port forwarding from port {target_port} to hide port number in URLs...")
+            self.port_forwarding_enabled = hosts_manager.setup_port_forwarding(self.server_port, target_port)
+        else:
+            print("No admin privileges. Port numbers will be visible in URLs.")
+            self.port_forwarding_enabled = False
         
         # Ensure absolute path for download directory
         abs_download_dir = os.path.abspath(self.download_dir)
@@ -274,25 +387,24 @@ class CaptchaReplicator:
         # Create a Flask app
         self.flask_app = Flask(__name__)
         
-        # Define route for root to list files (optional)
-        @self.flask_app.route('/')
-        def index():
-            files = os.listdir(abs_download_dir)
-            file_links = ['<li><a href="/{0}">{0}</a></li>'.format(f) for f in files]
-            return f"""
-            <html>
-                <head><title>Replicated CAPTCHA Server</title></head>
-                <body>
-                    <h1>Available CAPTCHA Files</h1>
-                    <ul>{''.join(file_links)}</ul>
-                </body>
-            </html>
-            """
+        # Define route for root to serve the HTML file with the original path structure
+        @self.flask_app.route('/', defaults={'path': ''})
+        @self.flask_app.route('/<path:path>')
+        def catch_all(path):
+            # Check if the path is a specific file in download directory
+            file_path = os.path.join(abs_download_dir, path)
+            if os.path.isfile(file_path):
+                return send_from_directory(abs_download_dir, path)
             
-        # Define route to serve files from the download directory
-        @self.flask_app.route('/<path:filename>')
-        def serve_file(filename):
-            return send_from_directory(abs_download_dir, filename)
+            # Otherwise find the most recent HTML file and serve it
+            html_files = [f for f in os.listdir(abs_download_dir) if f.endswith('.html')]
+            if html_files:
+                # Sort by creation time, newest first
+                latest_html = sorted(html_files, key=lambda f: os.path.getctime(os.path.join(abs_download_dir, f)), reverse=True)[0]
+                return send_from_directory(abs_download_dir, latest_html)
+            
+            # If no HTML files found
+            return "No HTML files available"
         
         # Add a shutdown route for clean termination
         @self.flask_app.route('/shutdown')
@@ -304,13 +416,14 @@ class CaptchaReplicator:
             return 'Server shutting down...'
         
         # Start the server in a separate thread
-        print(f"Starting HTTP server on port {self.server_port}...")
+        print(f"Starting {'HTTPS' if use_ssl else 'HTTP'} server on port {self.server_port}...")
         self.server_thread = threading.Thread(
             target=lambda: self.flask_app.run(
-                host='localhost', 
+                host='0.0.0.0',  # Bind to all interfaces instead of just localhost
                 port=self.server_port, 
                 debug=False, 
-                use_reloader=False
+                use_reloader=False,
+                ssl_context=ssl_context
             )
         )
         self.server_thread.daemon = True  # So the thread will exit when the main program exits
@@ -322,13 +435,21 @@ class CaptchaReplicator:
         return self.server_port
     
     def stop_http_server(self):
-        """Stop the HTTP server if it's running."""
+        """Stop the HTTP server if it's running and clean up port forwarding if enabled."""
+        # Clean up certificate files
+        self._cleanup_cert_files()
+        
+        # Remove port forwarding if it was set up
+        if self.port_forwarding_enabled and hosts_manager.is_admin():
+            hosts_manager.remove_port_forwarding()
+            self.port_forwarding_enabled = False
+        
         if self.server_thread and self.flask_app:
             print("Stopping HTTP server...")
             # Use a more reliable way to shut down the Flask server
             try:
                 # Create a request to shutdown the server
-                requests.get(f"http://localhost:{self.server_port}/shutdown")
+                requests.get(f"http://127.0.0.1:{self.server_port}/shutdown", verify=False)
             except:
                 pass  # If it fails, the daemon thread will be killed on program exit anyway
             
@@ -337,7 +458,7 @@ class CaptchaReplicator:
     
     def replicate_captcha(self, website_key, website_url, browser=None, is_invisible=False, data_s_value=None, 
                           is_enterprise=False, api_domain="google.com", user_agent=None, 
-                          cookies=None, observation_time=5):
+                          cookies=None, observation_time=5, bypass_domain_check=False, use_ssl=True):
         """
         Create and display a replicated reCAPTCHA challenge.
         
@@ -354,6 +475,8 @@ class CaptchaReplicator:
             cookies (list, optional): Cookies to set. Defaults to None.
             observation_time (int, optional): Time to keep browser open in seconds. Defaults to 5.
                                            Set to 0 to keep open until closed manually or token received.
+            bypass_domain_check (bool, optional): Whether to bypass domain check by adding to hosts file. Defaults to False.
+            use_ssl (bool, optional): Whether to use SSL (HTTPS). Defaults to True.
         
         Returns:
             tuple: If browser was provided: (html_path, token)
@@ -361,16 +484,33 @@ class CaptchaReplicator:
         """
         should_return_browser = False
         sb = None
+        domain_added = False
+        original_domain = None
+        original_scheme = None
         
         try:
             # Reset the last token
             self.last_token = None
             
             # Extract the original domain for reference only
-            original_domain = None
             if website_url:
                 parsed_url = urlparse(website_url)
                 original_domain = parsed_url.netloc
+                original_scheme = parsed_url.scheme or "http"  # Get the original protocol (http or https)
+                
+                # If bypass_domain_check is enabled, add the domain to hosts file
+                if bypass_domain_check and original_domain:
+                    print(f"Attempting to add domain '{original_domain}' to hosts file for bypass...")
+                    # Check if we have admin rights
+                    if not hosts_manager.is_admin():
+                        print("Administrator privileges required. Requesting elevation...")
+                        hosts_manager.restart_with_admin()
+                    # Add domain to hosts file
+                    domain_added = hosts_manager.add_to_hosts(original_domain)
+                    if domain_added:
+                        print(f"Domain '{original_domain}' added to hosts file successfully.")
+                    else:
+                        print(f"Failed to add domain '{original_domain}' to hosts file.")
             
             # Select appropriate API domain for Enterprise reCAPTCHA
             if is_enterprise and not api_domain.endswith('enterprise'):
@@ -388,16 +528,47 @@ class CaptchaReplicator:
                 api_domain=api_domain
             )
             
-            # Start HTTP server
-            server_port = self.start_http_server()
+            # Start HTTP server with SSL if requested
+            server_port = self.start_http_server(domain=original_domain, use_ssl=use_ssl)
             if not server_port:
                 print("Failed to start HTTP server")
                 return (None, None) if browser else (None, None, None)
             
             # Form URL to the HTML file
             file_basename = os.path.basename(html_path)
-            local_file_url = f"http://localhost:{server_port}/{file_basename}"
-            print(f"Using localhost URL: {local_file_url}")
+            
+            # If domain bypass is enabled and domain was added successfully, use the original domain
+            # instead of localhost in the URL to pass reCAPTCHA domain check
+            if bypass_domain_check and domain_added and original_domain:
+                # Extract path and query from original URL to mimic the full original URL structure
+                original_path = parsed_url.path
+                original_query = parsed_url.query
+                original_fragment = parsed_url.fragment
+                
+                # Use the original domain with the exact original path
+                if self.port_forwarding_enabled:
+                    # If port forwarding is active, we can use clean URLs without port numbers
+                    # Use HTTPS if SSL certificate is set up
+                    protocol = "https" if use_ssl else "http"
+                    local_file_url = f"{protocol}://{original_domain}{original_path}"
+                    if original_query:
+                        local_file_url += f"?{original_query}"
+                    if original_fragment:
+                        local_file_url += f"#{original_fragment}"
+                    print(f"Using clean spoofed domain URL: {local_file_url}")
+                else:
+                    # Need to include port which makes the URL look different
+                    protocol = "https" if use_ssl else "http"
+                    local_file_url = f"{protocol}://{original_domain}:{self.server_port}{original_path}"
+                    if original_query:
+                        local_file_url += f"?{original_query}"
+                    if original_fragment:
+                        local_file_url += f"#{original_fragment}"
+                    print(f"Using spoofed domain URL (with port): {local_file_url}")
+            else:
+                protocol = "https" if use_ssl else "http"
+                local_file_url = f"{protocol}://localhost:{self.server_port}/{file_basename}"
+                print(f"Using localhost URL: {local_file_url}")
             
             # Determine if we need to create a browser or use the provided one
             if browser is None:
@@ -408,6 +579,10 @@ class CaptchaReplicator:
                 
                 # Use context manager for the browser we created
                 with browser_instance as sb:
+                    # Add option to ignore SSL certificate errors
+                    if use_ssl:
+                        sb.driver.execute_cdp_cmd("Security.setIgnoreCertificateErrors", {"ignore": True})
+                    
                     result = self._handle_captcha_interaction(
                         sb, local_file_url, user_agent, cookies, 
                         observation_time
@@ -419,6 +594,11 @@ class CaptchaReplicator:
                 # Use the provided browser instance
                 self.browser = browser
                 sb = browser
+                
+                # Add option to ignore SSL certificate errors
+                if use_ssl:
+                    sb.driver.execute_cdp_cmd("Security.setIgnoreCertificateErrors", {"ignore": True})
+                
                 result = self._handle_captcha_interaction(
                     sb, local_file_url, user_agent, cookies, 
                     observation_time
@@ -433,6 +613,12 @@ class CaptchaReplicator:
             traceback.print_exc()
             self.stop_http_server()
             return (None, None) if browser else (None, None, None)
+        finally:
+            # Clean up hosts file if we added a domain
+            if domain_added and original_domain:
+                print(f"Removing domain '{original_domain}' from hosts file...")
+                hosts_manager.remove_from_hosts(original_domain)
+                print(f"Domain '{original_domain}' removed from hosts file.")
     
     def _handle_captcha_interaction(self, sb, local_file_url, user_agent=None, 
                                    cookies=None, observation_time=5):
@@ -590,8 +776,10 @@ if __name__ == "__main__":
         captcha_replicator = CaptchaReplicator(download_dir=download_dir)
         
         # Example reCAPTCHA parameters from Google's demo page
-        website_key = "6Le-wvkSAAAAAPBMRTvw0Q4Muexq9bi0DJwx_mJ-"
-        website_url = "https://www.google.com/recaptcha/api2/demo"
+        website_key = "6LdnlkAUAAAAAL2zK68LwI1rDeclqZFiYr9jTSOX"
+        website_url = "https://lnnte-dncl.gc.ca/en/Consumer/Check-your-registration/#!/"
+        # website_key = "6Le-wvkSAAAAAPBMRTvw0Q4Muexq9bi0DJwx_mJ-"
+        # website_url = "https://www.google.com/recaptcha/api2/demo"
         
         print("\n=== Testing CaptchaReplicator ===")
         print(f"Opening replicated reCAPTCHA with sitekey: {website_key}")
@@ -599,10 +787,13 @@ if __name__ == "__main__":
         
         try:
             # Replicate the captcha (passing browser=None to create a new browser)
+            # Set bypass_domain_check to True to test the hosts file functionality
             html_path, browser, token = captcha_replicator.replicate_captcha(
                 website_key=website_key,
                 website_url=website_url,
-                observation_time=100  # Keep open longer for demonstration
+                observation_time=100,  # Keep open longer for demonstration
+                bypass_domain_check=True,  # Enable hosts file bypass
+                use_ssl=True  # Use SSL with self-signed certificate
             )
             
             if not html_path or not browser:

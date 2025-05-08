@@ -61,21 +61,32 @@ def add_to_hosts(domain, ip_address="127.0.0.1"):
         hosts_file = Path(HOSTS_FILE_PATH)
         hosts_content = hosts_file.read_text()
         
-        # Check if entry already exists
-        entry = f"{ip_address} {domain}"
-        if entry in hosts_content:
-            print(f"Entry '{entry}' already exists in hosts file.")
-            return True
+        # Determine domain variations to add (with and without www)
+        domains_to_add = [domain]
+        if domain.startswith('www.'):
+            # If domain starts with www, also add the non-www version
+            domains_to_add.append(domain[4:])
+        elif not domain.startswith('www.'):
+            # If domain doesn't start with www, also add the www version
+            domains_to_add.append(f"www.{domain}")
         
         # Create a backup
         backup_path = hosts_file.with_suffix(".bak")
         hosts_file.replace(backup_path)
         
-        # Add our entry
+        # Add our entries
         new_content = hosts_content
         if new_content and not new_content.endswith("\n"):
             new_content += "\n"
-        new_content += f"{entry}  # Added by captcha_solver\n"
+        
+        domains_added = []
+        for d in domains_to_add:
+            entry = f"{ip_address} {d}"
+            if entry not in hosts_content:
+                new_content += f"{entry}  # Added by captcha_solver\n"
+                domains_added.append(d)
+            else:
+                print(f"Entry '{entry}' already exists in hosts file.")
         
         # Write to temporary file first
         temp_file = tempfile.NamedTemporaryFile(delete=False, mode='w')
@@ -85,7 +96,8 @@ def add_to_hosts(domain, ip_address="127.0.0.1"):
         # Copy temp file to hosts file location (safer than direct write)
         os.replace(temp_file.name, HOSTS_FILE_PATH)
         
-        print(f"Successfully added '{entry}' to hosts file.")
+        if domains_added:
+            print(f"Successfully added domains to hosts file: {', '.join(domains_added)}")
         
         # Flush DNS cache to apply changes immediately
         flush_dns_cache()
@@ -116,24 +128,33 @@ def remove_from_hosts(domain, ip_address="127.0.0.1"):
         hosts_file = Path(HOSTS_FILE_PATH)
         hosts_content = hosts_file.read_text()
         
-        # Check if entry exists
-        entry = f"{ip_address} {domain}"
-        comment_entry = f"{entry}  # Added by captcha_solver"
-        
-        if entry not in hosts_content and comment_entry not in hosts_content:
-            print(f"Entry for '{domain}' not found in hosts file.")
-            return True
+        # Determine domain variations to remove (with and without www)
+        domains_to_remove = [domain]
+        if domain.startswith('www.'):
+            # If domain starts with www, also remove the non-www version
+            domains_to_remove.append(domain[4:])
+        elif not domain.startswith('www.'):
+            # If domain doesn't start with www, also remove the www version
+            domains_to_remove.append(f"www.{domain}")
         
         # Create a backup
         backup_path = hosts_file.with_suffix(".bak")
         hosts_file.replace(backup_path)
         
-        # Remove the entry and its variations
+        # Process the file line by line to remove entries for all domain variants
         lines = hosts_content.splitlines()
         new_lines = []
+        removed_domains = []
+        
         for line in lines:
-            if (f"{ip_address} {domain}" not in line and 
-                not (line.strip().startswith(f"{ip_address} {domain}"))):
+            should_keep = True
+            for d in domains_to_remove:
+                if f"{ip_address} {d}" in line or line.strip().startswith(f"{ip_address} {d}"):
+                    should_keep = False
+                    removed_domains.append(d)
+                    break
+            
+            if should_keep:
                 new_lines.append(line)
         
         new_content = "\n".join(new_lines)
@@ -148,7 +169,8 @@ def remove_from_hosts(domain, ip_address="127.0.0.1"):
         # Copy temp file to hosts file location (safer than direct write)
         os.replace(temp_file.name, HOSTS_FILE_PATH)
         
-        print(f"Successfully removed '{domain}' from hosts file.")
+        if removed_domains:
+            print(f"Successfully removed domains from hosts file: {', '.join(set(removed_domains))}")
         
         # Flush DNS cache to apply changes immediately
         flush_dns_cache()
@@ -201,6 +223,121 @@ def check_domain_in_hosts(domain, ip_address="127.0.0.1"):
         print(f"Error checking hosts file: {e}")
         return False
 
+def admin_run_command(command):
+    """
+    Run a command with elevated (administrator) privileges.
+    
+    Args:
+        command (str): Command to run with admin rights
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not is_admin():
+        print(f"Error: Administrator privileges required to run '{command}'")
+        return False
+        
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=True,
+            check=True
+        )
+        print(f"Command executed successfully: {command}")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error executing command: {e}")
+        print(f"stderr: {e.stderr.decode() if e.stderr else 'None'}")
+        return False
+    except Exception as e:
+        print(f"Unexpected error running command: {e}")
+        return False
+
+def setup_port_forwarding(port, target_port=80):
+    """
+    Set up port forwarding from high port to port 80/443 using netsh interface portproxy.
+    This allows a non-admin process to effectively use standard web ports via forwarding.
+    
+    Args:
+        port (int): The high numbered port the app is actually running on
+        target_port (int): The port to forward to (80 for HTTP, 443 for HTTPS)
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not is_admin():
+        print("Error: Administrator privileges required to set up port forwarding")
+        return False
+        
+    try:
+        # Delete any existing port forwarding rules for target port
+        delete_cmd = f"netsh interface portproxy delete v4tov4 listenport={target_port} listenaddress=0.0.0.0"
+        subprocess.run(delete_cmd, shell=True, stderr=subprocess.PIPE)
+        
+        # Add new port forwarding rule that listens on all interfaces
+        add_cmd = f"netsh interface portproxy add v4tov4 listenport={target_port} listenaddress=0.0.0.0 connectport={port} connectaddress=127.0.0.1"
+        result = subprocess.run(
+            add_cmd, 
+            shell=True, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE,
+            check=True
+        )
+        
+        print(f"Successfully set up port forwarding from port {target_port} to {port}")
+        
+        # Add a firewall rule to allow incoming connections to the target port if it doesn't exist
+        protocol = "HTTPS" if target_port == 443 else "HTTP"
+        fw_name = f"CaptchaSolver{protocol}Access"
+        fw_cmd = f'netsh advfirewall firewall show rule name="{fw_name}" >nul 2>&1 || '
+        fw_cmd += f'netsh advfirewall firewall add rule name="{fw_name}" dir=in action=allow protocol=TCP localport={target_port}'
+        subprocess.run(fw_cmd, shell=True, stderr=subprocess.PIPE)
+        
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error setting up port forwarding: {e}")
+        print(f"stderr: {e.stderr.decode() if e.stderr else 'None'}")
+        return False
+    except Exception as e:
+        print(f"Unexpected error setting up port forwarding: {e}")
+        return False
+
+def remove_port_forwarding(target_port=80):
+    """
+    Remove port forwarding rules previously set up.
+    
+    Args:
+        target_port (int): The listening port to remove forwarding for (usually 80)
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not is_admin():
+        print("Error: Administrator privileges required to remove port forwarding")
+        return False
+        
+    try:
+        # Delete the port forwarding rule
+        delete_cmd = f"netsh interface portproxy delete v4tov4 listenport={target_port} listenaddress=0.0.0.0"
+        result = subprocess.run(
+            delete_cmd, 
+            shell=True, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE,
+            check=True
+        )
+        
+        print(f"Successfully removed port forwarding for port {target_port}")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error removing port forwarding: {e}")
+        print(f"stderr: {e.stderr.decode() if e.stderr else 'None'}")
+        return False
+    except Exception as e:
+        print(f"Unexpected error removing port forwarding: {e}")
+        return False
 
 if __name__ == "__main__":
     # Test the hosts file manager
