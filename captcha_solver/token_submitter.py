@@ -23,14 +23,13 @@ class TokenSubmitter:
         # Ensure the download directory exists
         os.makedirs(self.download_dir, exist_ok=True)
     
-    def apply_token(self, sb, token, submit_form=False):
+    def apply_token(self, sb, token):
         """
         Apply a reCAPTCHA token to the page, verify it, and optionally submit the form.
         
         Args:
             sb: SeleniumBase instance
             token: The reCAPTCHA token to apply
-            submit_form: Whether to submit the form after applying the token
             
         Returns:
             dict: Result containing success status and other information
@@ -84,43 +83,31 @@ class TokenSubmitter:
             result["token_applied"] = True
 
       
-            # Step 3: Execute callback if available
+            # Step 2: Execute callback if available
             print("Looking for reCAPTCHA clients...")
             clients = self._find_recaptcha_clients(sb)
+            print(clients)
             
             if clients:
                 print(f"Found {len(clients)} reCAPTCHA clients")
+                client = clients[0]
                 # Try to execute callback for each client
-                for client in clients:
-                    if self._execute_callback(sb, client, token):
-                        print(f"✅ Successfully executed callback for client {client['id']}")
-                        break
-                    else:
-                        print(f"⚠️ Failed to execute callback for client {client['id']}")
+                if self._execute_callback(sb, client, token):
+                    print(f"✅ Successfully executed callback for client {client['id']}")
+                else:
+                    print(f"⚠️ Failed to execute callback for client {client['id']}")
             else:
                 print("No reCAPTCHA clients found, but token was injected")
-            
+
+
+            time.sleep(20)
+             
             # Step 4: Verify token application
             print("\nVerifying token application...")
-            # Check if the response field has the token value
-            has_token = False
             
             # Re-fetch the response fields to ensure we have the latest state
             response_fields = sb.find_elements('textarea[name="g-recaptcha-response"]')
             
-            for i, field in enumerate(response_fields):
-                value = sb.execute_script("return arguments[0].value", field)
-                if value:
-                    print(f"✅ Response field {i+1}/{len(response_fields)} has a token value")
-                    has_token = True
-                else:
-                    print(f"⚠️ Response field {i+1}/{len(response_fields)} is empty")
-            
-            if not has_token:
-                print("❌ No token found in any response field")
-                result["error"] = "Token verification failed - no token found"
-                return result
-                
             # Check if the reCAPTCHA challenge is still visible (which would indicate failure)
             challenge_iframes = sb.find_elements('iframe[src*="recaptcha/api2/bframe"]')
             
@@ -164,53 +151,7 @@ class TokenSubmitter:
             
             print("✅ reCAPTCHA token appears to be properly applied")
             result["verified"] = True
-            
-            # Step 5: Submit the form if requested
-            if submit_form:
-                print("\nSubmitting form...")
-                try:
-                    # Find the form containing the reCAPTCHA response element
-                    print("Looking for form containing reCAPTCHA...")
-                    recaptcha_elements = sb.find_elements("textarea[name='g-recaptcha-response'], input[name='g-recaptcha-response']")
-                    
-                    if not recaptcha_elements:
-                        print("No reCAPTCHA response elements found")
-                        result["error"] = "Form submission failed - no reCAPTCHA elements found"
-                        return result
                         
-                    print(f"Found {len(recaptcha_elements)} reCAPTCHA elements")
-                    
-                    # Try to submit using the first element found
-                    # Find the parent form using JavaScript
-                    form = sb.execute_script("return arguments[0].closest('form')", recaptcha_elements[0])
-                    if not form:
-                        print("No parent form found for reCAPTCHA element")
-                        result["error"] = "Form submission failed - no parent form found"
-                        return result
-                        
-                    print("Found form containing reCAPTCHA")
-                    
-                    # First try to find and click a submit button in this form
-                    submit_buttons = sb.execute_script(
-                        "return Array.from(arguments[0].querySelectorAll('button[type=\"submit\"], input[type=\"submit\"]'))", 
-                        form
-                    )
-                    
-                    if submit_buttons and len(submit_buttons) > 0:
-                        print("Found submit button in form, clicking it...")
-                        sb.execute_script("arguments[0].click()", submit_buttons[0])
-                        print("Form submitted by clicking submit button")
-                        result["form_submitted"] = True
-                    else:
-                        # If no submit button found, try to submit the form directly
-                        print("No submit button found, submitting form directly...")
-                        sb.execute_script("arguments[0].submit()", form)
-                        print("Form submitted using submit() method")
-                        result["form_submitted"] = True
-                        
-                except Exception as e:
-                    print(f"Error submitting form: {e}")
-                    result["error"] = f"Form submission failed: {str(e)}"
                     # Don't return here, as the token was still applied successfully
             
             # Success!
@@ -355,69 +296,6 @@ class TokenSubmitter:
         print(f"Executing callback function for client {client['id']}...")
         
         try:
-            # STEP 1: Try to execute callback from client information
-            if client.get('callback') and client.get('function'):
-                print(f"Found callback information: {client.get('callback')} / {client.get('function')}")
-                
-                # There are different possible callback structures, try them all
-                callback_result = sb.execute_script("""
-                    try {
-                        const clientId = arguments[0];
-                        const funcName = arguments[1];
-                        const callbackType = arguments[2];
-                        const token = arguments[3];
-                        const clients = ___grecaptcha_cfg.clients;
-                        
-                        // Case 1: Function reference directly in the client object
-                        if (callbackType === 'function' && 
-                            typeof clients[clientId][funcName] === 'function') {
-                            console.log("Calling direct function callback");
-                            clients[clientId][funcName](token);
-                            return "CALLED_DIRECT_FUNCTION";
-                        }
-                        
-                        // Case 2: The selectedByButtonElement function
-                        else if (funcName === 'selectedByButtonElement' && 
-                                typeof clients[clientId][callbackType] === 'object' && 
-                                typeof clients[clientId][callbackType].selectedByButtonElement === 'function') {
-                            console.log("Calling selectedByButtonElement");
-                            clients[clientId][callbackType].selectedByButtonElement(token);
-                            return "CALLED_SELECTED_BY_BUTTON";
-                        }
-                        
-                        // Case 3: String name of global function
-                        else if (typeof callbackType === 'string' && window[callbackType]) {
-                            console.log("Calling global function by name");
-                            window[callbackType](token);
-                            return "CALLED_GLOBAL_FUNCTION";
-                        }
-                        
-                        // Case 4: Nested function in client object
-                        else if (clients[clientId][funcName] && 
-                                typeof clients[clientId][funcName][callbackType] === 'function') {
-                            console.log("Calling nested callback function");
-                            clients[clientId][funcName][callbackType](token);
-                            return "CALLED_NESTED_FUNCTION";
-                        }
-                        
-                        return "NO_CALLBACK_MATCH";
-                    } catch (e) {
-                        console.error("Error calling callback:", e);
-                        return "ERROR: " + e.message;
-                    }
-                """, client['id'], client.get('function'), client.get('callback'), token)
-                
-                print(f"Callback execution result: {callback_result}")
-                
-                if isinstance(callback_result, str) and callback_result.startswith("CALLED_"):
-                    print("✅ Successfully called callback function")
-                    return True
-                else:
-                    print("⚠️ Failed to call callback function from client info")
-            else:
-                print("No callback information found in client data")
-            
-            # STEP 2: Try to find callback from data-callback attribute as fallback
             print("Looking for callback in data-callback attribute...")
             _, callback_name = self._find_recaptcha_div(sb, client.get('id'))
             
@@ -477,7 +355,7 @@ if __name__ == "__main__":
             
             # Create token submitter and apply token
             submitter = TokenSubmitter(download_dir="tmp")
-            result = submitter.apply_token(sb, dummy_token, submit_form=True)
+            result = submitter.apply_token(sb, dummy_token)
             
             # Check result
             if result["success"]:
