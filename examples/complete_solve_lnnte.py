@@ -110,7 +110,7 @@ def main():
             
             # Step 6: Apply the token to the page
             print("\n--- Step 6: Applying Token to Page ---")
-            token_applied = submitter.apply_token(sb, token, params)
+            token_applied = submitter.apply_token(sb, token)
             
             if token_applied:
                 print("✅ Token applied successfully to the page!")
@@ -139,7 +139,7 @@ def main():
             
             # Wait before closing the browser
             print("\nKeeping browser open for 10 seconds for observation...")
-            sb.sleep(10)
+            sb.sleep(1000)
             
         # Calculate total time
         total_time = time.time() - start_time
