@@ -3,20 +3,21 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "captcha-solver"
+name = "captcha-ai-solver"
 version = "0.1.0"
-description = "A package for solving reCAPTCHA challenges using audio transcription"
+description = "A powerful AI-based library for solving reCAPTCHA challenges"
 readme = "README.md"
 authors = [
     {name = "@njraladdin", email = "aladynjr@gmail.com"}
 ]
-keywords = ["captcha", "recaptcha", "automation", "selenium", "seleniumbase"]
+keywords = ["captcha", "recaptcha", "automation", "selenium", "ai", "solver"]
 requires-python = ">=3.7"
 dependencies = [
     "seleniumbase",
     "requests",
     "python-dotenv",
     "flask>=2.0.0",
+    "pyOpenSSL"
 ]
 
 [project.optional-dependencies]

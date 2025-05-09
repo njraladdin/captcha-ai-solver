@@ -19,8 +19,12 @@ extracting params and submitting solution is already solved in other projects. (
 readme contains instructions to setup server. 
 
 meaning this captcha solver starts a server 
-it receives request with captcha params, returns with id
+it receives request with captcha params (captcha type- for now only recaptcha v2, captchaparams- with recaptcha params are websiteurl and websitekey), responds with task id. 
 it receives request with task id to check captcha solving status
 if still processing : 202. if finished : returns solution token. 
 
+server is setup on a differnet project. for htis project, it simpyl receives params and returns token. 
+this also provides the option to use the server instead of running this locally 
+
+- publish pip package
 - add lnnte usecase 

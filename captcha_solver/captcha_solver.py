@@ -84,7 +84,7 @@ class CaptchaSolver:
             print("\n--- Step 1: Creating browser instance ---")
             
             # PROPERLY USE THE CONTEXT MANAGER WITH 'with' STATEMENT
-            with SB(uc=True, headless=False) as browser:
+            with SB(uc=False, headless=False, test=True, locale="en") as browser:
                 print(f"Browser instance created: {type(browser)}")
                 
                 # Set up the captcha in the browser
