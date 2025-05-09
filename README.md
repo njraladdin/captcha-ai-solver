@@ -17,6 +17,12 @@ A powerful AI-based library for solving reCAPTCHA v2 challenges programmatically
 pip install captcha-ai-solver
 ```
 
+## Important Note
+
+**Windows Only** - Requires Admin privileges (modifies hosts file when it needs to replicate the captcha environment and spoof the original website domain).
+
+This library inputs captcha parameters and outputs solution tokens. For extracting parameters or applying tokens, see: [this guide](https://gist.github.com/2captcha/2ee70fa1130e756e1693a5d4be4d8c70)
+
 ## Quick Start
 
 ```python
@@ -111,7 +117,7 @@ If you want to contribute or modify the library, follow these steps to set up a 
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/captcha-ai-solver.git
+git clone https://github.com/njraladdin/captcha-ai-solver.git
 cd captcha-ai-solver
 ```
 
