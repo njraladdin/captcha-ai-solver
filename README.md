@@ -1,15 +1,13 @@
 # Captcha AI Solver
 
-A powerful AI-based library for solving reCAPTCHA v2 challenges programmatically.
+Python library that solves reCAPTCHA v2 by replicating the challenge locally and using Wit.ai for audio transcription. Windows-only, requires admin privileges.
 
 ## Features
 
-- Solves reCAPTCHA v2 challenges automatically
-- Uses AI-powered audio transcription for solving captchas
-- Simple and clean Python API
-- Easy to integrate into any project
-- Handles both standard and invisible reCAPTCHAs
-- Supports enterprise reCAPTCHA
+- Replicates reCAPTCHA v2 by spoofing domains in hosts file
+- Solves standard reCAPTCHA v2
+- Uses Wit.ai API for audio challenge transcription
+- Returns solution tokens for form submission
 
 ## Installation
 

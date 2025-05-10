@@ -22,18 +22,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
     "black",
 ]
 
 [tool.setuptools]
-packages = ["captcha_solver"]
-
-[tool.pytest.ini_options]
-markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-]
-testpaths = ["tests"]
-python_files = "test_*.py"
-python_classes = "Test*"
-python_functions = "test_*" 
+packages = ["captcha_solver"] 
