@@ -267,9 +267,10 @@ class AudioChallengeSolver:
             sb: SeleniumBase instance (should be an active browser session)
             
         Returns:
-            tuple: (token, success_status)
+            tuple: (token, success_status, error_message)
                 - token: The reCAPTCHA token string if successful, None otherwise
                 - success_status: Boolean indicating whether the CAPTCHA was successfully solved
+                - error_message: String describing the error if unsuccessful, None if successful
         """
         print("\n--- Starting reCAPTCHA Interaction ---")
         
@@ -319,7 +320,7 @@ class AudioChallengeSolver:
                 print(f"SUCCESS! Immediate token found: {token_val[:20]}...")
                 recaptcha_token = token_val
                 captcha_solved_successfully = True
-                return recaptcha_token, captcha_solved_successfully
+                return recaptcha_token, captcha_solved_successfully, None
                 
             # Only proceed to challenge frame if we didn't get an immediate token
             # 2. Interact with the Challenge Frame (Audio Button)
@@ -348,7 +349,8 @@ class AudioChallengeSolver:
                 print(f"Blocking message found: '{self.BLOCKED_MESSAGE_TEXT}'")
                 got_blocked = True
                 captcha_solved_successfully = False
-                return recaptcha_token, captcha_solved_successfully
+                error_message = "Account/IP appears to be blocked by reCAPTCHA ('Try again later')"
+                return recaptcha_token, captcha_solved_successfully, error_message
 
             # Check for audio challenge input
             sb.wait_for_element_visible(self.AUDIO_CHALLENGE_INPUT_SELECTOR, timeout=10)
@@ -362,11 +364,13 @@ class AudioChallengeSolver:
                 else:
                     print("Audio source 'src' attribute is empty.")
                     captcha_solved_successfully = False
-                    return recaptcha_token, captcha_solved_successfully
+                    error_message = "Audio source 'src' attribute is empty"
+                    return recaptcha_token, captcha_solved_successfully, error_message
             else:
                 print("Audio source element not found.")
                 captcha_solved_successfully = False
-                return recaptcha_token, captcha_solved_successfully
+                error_message = "Audio source element not found"
+                return recaptcha_token, captcha_solved_successfully, error_message
                 
             # Process audio challenge if loaded successfully
             if audio_url and audio_challenge_loaded and not got_blocked:
@@ -439,7 +443,7 @@ class AudioChallengeSolver:
                                 print(f"SUCCESS! Token found: {token_val[:20]}...")
                                 recaptcha_token = token_val
                                 captcha_solved_successfully = True
-                                return recaptcha_token, captcha_solved_successfully
+                                return recaptcha_token, captcha_solved_successfully, None
                             
                             # Check for failures only if token wasn't found
                             # Switch back to challenge frame to check for errors
@@ -447,105 +451,47 @@ class AudioChallengeSolver:
                             if sb.is_element_visible(self.RECAPTCHA_CHALLENGE_FRAME_SELECTOR):
                                 sb.switch_to_frame(self.RECAPTCHA_CHALLENGE_FRAME_SELECTOR)
                                 
-                                # Check for "need more solutions" error
-                                if sb.is_text_visible(self.RECAPTCHA_ERROR_MESSAGE_TEXT, 
-                                                     selector=self.RECAPTCHA_ERROR_MESSAGE_SELECTOR):
-                                    print(f"Error found: '{self.RECAPTCHA_ERROR_MESSAGE_TEXT}'")
+                                # Check if we need more solutions
+                                if self._check_for_need_more_solutions(sb, self.RECAPTCHA_CHALLENGE_FRAME_SELECTOR):
+                                    print("Multiple correct solutions required. Will try again.")
                                     captcha_failed_need_more = True
-                                    captcha_solved_successfully = False
-                                    break  # Exit the token check loop
-                                
-                                # Check for blocking message
-                                if sb.is_text_visible(self.BLOCKED_MESSAGE_TEXT, 
-                                                     selector=self.BLOCKED_MESSAGE_SELECTOR):
-                                    print(f"Blocked message found: '{self.BLOCKED_MESSAGE_TEXT}'")
-                                    got_blocked = True
-                                    captcha_solved_successfully = False
-                                    return recaptcha_token, captcha_solved_successfully  # Exit completely
+                                    break  # Break out of the token check loop, but continue with audio attempts
                             
-                        # After token check loop
-                        # If we need more solutions and we still have attempts left
-                        if captcha_failed_need_more and audio_attempt < max_audio_attempts - 1:
-                            print("Detected 'Multiple correct solutions required', trying a new audio challenge...")
-                            captcha_failed_need_more = False  # Reset the flag for next attempt
-                            
-                            # Clear the previous input field and continue
-                            try:
-                                # Ensure we're in the challenge frame
-                                sb.switch_to_default_content()
-                                sb.switch_to_frame(self.RECAPTCHA_CHALLENGE_FRAME_SELECTOR)
-                                
-                                # Clear the input field
-                                if sb.is_element_present(self.AUDIO_CHALLENGE_INPUT_SELECTOR):
-                                    sb.clear(self.AUDIO_CHALLENGE_INPUT_SELECTOR)
-                                    print("Cleared previous audio challenge input field.")
-                            except Exception as clear_err:
-                                print(f"Warning: Could not clear input field: {clear_err}")
-                            
-                            # Continue to next iteration (get new audio)
-                            continue
-                        
-                        # If we got here with no token, make one final token check
-                        if not recaptcha_token:
+                            # Switch back to default content for next token check
                             sb.switch_to_default_content()
-                            final_token = self._check_for_token(sb)
-                            if final_token:
-                                print(f"SUCCESS on final check! Token found: {final_token[:20]}...")
-                                recaptcha_token = final_token
-                                captcha_solved_successfully = True
-                                break  # Break the audio attempt loop
-                            
-                            # If this is the last attempt and we still don't have a token
-                            if audio_attempt == max_audio_attempts - 1:
-                                captcha_solved_successfully = False
-                            
+                        
+                        # If we got here without returning, the token wasn't found after submitting
+                        # Continue to next audio attempt
+                        
                     except Exception as submit_err:
-                        print(f"ERROR submitting transcription or clicking verify: {submit_err}")
-                        # Only mark as failed if this is our last attempt
-                        if audio_attempt == max_audio_attempts - 1:
-                            captcha_solved_successfully = False
-                            error_message = f"Submission failed: {submit_err}"
-                            sb.save_screenshot(os.path.join(self.download_dir, "captcha_submit_error.png"))
+                        print(f"ERROR during transcription submission: {submit_err}")
+                        error_message = f"Error during transcription submission: {submit_err}"
+                        continue  # Try next attempt
                 
-                # End of audio challenge retry loop
-                if not transcription_submitted:
-                    print(f"Failed to solve audio challenge after {max_audio_attempts} attempts.")
-                    captcha_solved_successfully = False
-
-        except (NoSuchElementException, TimeoutException, NoSuchFrameException) as e:
-            print(f"ERROR during WebDriver interaction (Timeout/Element Not Found/No Frame): {e}")
-            unexpected_error_occurred = True
-            error_message = str(e)
-            try:
-                if hasattr(sb, 'driver') and sb.driver:
-                     current_frame = sb.driver.execute_script("return window.frameElement ? window.frameElement.outerHTML : 'default_content';")
-                     print(f"Error occurred possibly in frame: {current_frame[:150]}...")
+                # End of audio attempts loop
+                # If we got here, all audio attempts failed
+                print("\n--- All audio challenge attempts exhausted ---")
+                
+                # Set appropriate error message based on what happened
+                if captcha_failed_need_more:
+                    error_message = "reCAPTCHA required multiple solutions and all attempts were exhausted"
+                elif not transcription:
+                    error_message = "Failed to transcribe audio after multiple attempts"
+                elif not transcription_submitted:
+                    error_message = "Failed to submit transcription after multiple attempts"
                 else:
-                    print("Driver not available to determine frame context.")
-            except Exception as frame_err:
-                print(f"Could not determine current frame context: {frame_err}")
-            sb.save_screenshot(os.path.join(self.download_dir, "captcha_reconnect_error.png"))
-            sb.save_page_source(os.path.join(self.download_dir, "captcha_reconnect_error.html"))
-
+                    error_message = "Transcription submitted but token not received"
+                    
         except Exception as e:
-            print(f"UNEXPECTED ERROR during WebDriver interaction: {e}")
+            # Handle unexpected errors
             unexpected_error_occurred = True
-            error_message = str(e)
-            try:
-                if hasattr(sb, 'driver') and sb.driver:
-                    current_frame = sb.driver.execute_script("return window.frameElement ? window.frameElement.outerHTML : 'default_content';")
-                    print(f"Error occurred possibly in frame: {current_frame[:150]}...")
-                else:
-                    print("Driver not available to determine frame context.")
-            except Exception as frame_err:
-                print(f"Could not determine current frame context: {frame_err}")
-            sb.save_screenshot(os.path.join(self.download_dir, "captcha_unexpected_error.png"))
-            sb.save_page_source(os.path.join(self.download_dir, "captcha_unexpected_error.html"))
-
+            error_message = f"Unexpected error during CAPTCHA solving: {e}"
+            print(f"ERROR: {error_message}")
+            import traceback
+            traceback.print_exc()
+        
         finally:
-            print("\n--- Finalizing reCAPTCHA Interaction ---")
-            
-            # Always ensure we're back to default content before returning
+            # Ensure we're back at the default content level
             try:
                 print("Switching back to default content before returning...")
                 sb.switch_to_default_content()
@@ -572,14 +518,24 @@ class AudioChallengeSolver:
                 print(f"RESULT: SUCCESS! CAPTCHA Solved. Token: {recaptcha_token[:20]}...")
             elif transcription_submitted and not captcha_solved_successfully:
                 print("RESULT: FAILED - Transcription submitted, but token check failed")
+                if not error_message:
+                    error_message = "Transcription submitted, but token check failed"
             elif transcription and not transcription_submitted:
                 print("RESULT: FAILED - Transcription obtained but submission failed")
+                if not error_message:
+                    error_message = "Transcription obtained but submission failed"
             elif audio_challenge_loaded and not transcription:
                 print("RESULT: FAILED - Audio loaded but Transcription failed")
+                if not error_message:
+                    error_message = "Audio loaded but transcription failed"
             elif audio_challenge_loaded and not audio_url:
                 print("RESULT: FAILED - Audio loaded but URL extraction failed")
+                if not error_message:
+                    error_message = "Audio loaded but URL extraction failed"
             else:
                 print("RESULT: FAILED - Could not complete the CAPTCHA interaction process.")
+                if not error_message:
+                    error_message = "Could not complete the CAPTCHA interaction process"
 
             # Additional detailed reporting
             if audio_url: 
@@ -589,7 +545,7 @@ class AudioChallengeSolver:
             if transcription: 
                 print(f"--> Transcription: '{transcription}'")
         
-        return recaptcha_token, captcha_solved_successfully
+        return recaptcha_token, captcha_solved_successfully, error_message
 
 if __name__ == "__main__":
     import os
@@ -619,7 +575,8 @@ if __name__ == "__main__":
         #go to url 
         sb.open(test_url)
         # Test the solver
-        token, success = solver.solve(sb)
+        token, success, error = solver.solve(sb)
         print(f"--> Solved: {success}")
         print(f"--> Token: {token[:20]}...")
+        print(f"--> Error: {error}")
     

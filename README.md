@@ -29,9 +29,7 @@ from captcha_solver import solve_captcha
 # Define captcha parameters
 captcha_params = {
     "website_url": "https://www.google.com/recaptcha/api2/demo",
-    "website_key": "6Le-wvkSAAAAAPBMRTvw0Q4Muexq9bi0DJwx_mJ-",
-    "is_invisible": False,
-    "is_enterprise": False
+    "website_key": "6Le-wvkSAAAAAPBMRTvw0Q4Muexq9bi0DJwx_mJ-"
 }
 
 # solver configuration
@@ -40,17 +38,17 @@ solver_config = {
 }
 
 # Solve the captcha
-token = solve_captcha(
+result = solve_captcha(
     captcha_type="recaptcha_v2",
-        captcha_params=captcha_params,
-        solver_config=solver_config
+    captcha_params=captcha_params,
+    solver_config=solver_config
 )
 
-if token:
-    print(f"Captcha solved! Token: {token[:30]}...")
+if result["success"]:
+    print(f"Captcha solved! Token: {result['token'][:30]}...")
     # Use the token in your application
 else:
-    print("Failed to solve captcha")
+    print(f"Failed to solve captcha: {result['error']}")
 ```
 
 ## Detailed Usage
@@ -59,7 +57,7 @@ else:
 
 Currently, the library supports:
 
-- `RecaptchaV2`: Standard and invisible reCAPTCHA v2
+- `RecaptchaV2`: Standard reCAPTCHA v2
 
 ### Captcha Parameters
 
@@ -69,9 +67,6 @@ For `RecaptchaV2`:
 |-----------|------|----------|-------------|
 | website_url | string | Yes | URL of the website with the captcha |
 | website_key | string | Yes | reCAPTCHA site key |
-| is_invisible | boolean | No | Whether it's an invisible reCAPTCHA (default: false) |
-| is_enterprise | boolean | No | Whether it's an enterprise reCAPTCHA (default: false) |
-| data_s_value | string | No | The value of data-s parameter if present |
 
 ### Solver Configuration
 
@@ -80,12 +75,22 @@ For `RecaptchaV2`:
 | wit_api_key | string | API key for Wit.ai speech recognition (required for audio challenges) |
 | download_dir | string | Directory for temporary files (default: "tmp") |
 
+### Return Value
+
+The `solve_captcha` function returns a result object with the following properties:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| success | boolean | Whether the solving was successful |
+| token | string or null | The solved captcha token if successful, null otherwise |
+| error | string or null | Error message if unsuccessful, null otherwise |
+
 ## Example Script
 
 The library includes an example script that demonstrates how to use it:
 
 ```bash
-python example.py --website "https://example.com" --key "your-recaptcha-key" --invisible --enterprise
+python example.py --website "https://example.com" --key "your-recaptcha-key"
 ```
 
 ## How It Works

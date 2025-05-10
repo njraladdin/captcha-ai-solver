@@ -59,25 +59,23 @@ class CaptchaSolver:
             params (dict): Dictionary containing captcha parameters:
                 - website_key (str): reCAPTCHA site key
                 - website_url (str): URL where captcha appears
-                - is_invisible (bool, optional): Whether it's invisible
                 - data_s_value (str, optional): data-s parameter if present
-                - is_enterprise (bool, optional): If it's enterprise reCAPTCHA
             
         Returns:
-            tuple: (token, success_status)
+            tuple: (token, success_status, error_message)
                 - token (str): The solved reCAPTCHA token if successful, None otherwise
                 - success_status (bool): Whether the solving was successful
+                - error_message (str or None): Error message if unsuccessful, None if successful
         """
         print("\n=== Solving reCAPTCHA with Provided Parameters ===")
         print(f"Site key: {params.get('website_key')}")
         print(f"Website URL: {params.get('website_url')}")
-        print(f"Is invisible: {params.get('is_invisible', False)}")
-        print(f"Is enterprise: {params.get('is_enterprise', False)}")
         
         # Validate required parameters
         if not params.get("website_key") or not params.get("website_url"):
-            print("ERROR: Missing required parameters (website_key and website_url)")
-            return None, False
+            error_msg = "Missing required parameters (website_key and website_url)"
+            print(f"ERROR: {error_msg}")
+            return None, False, error_msg
         
         try:
             # Create a SeleniumBase browser instance
@@ -93,9 +91,7 @@ class CaptchaSolver:
                     website_key=params["website_key"],
                     website_url=params["website_url"],
                     browser=browser,
-                    is_invisible=params.get("is_invisible", False),
                     data_s_value=params.get("data_s_value"),
-                    is_enterprise=params.get("is_enterprise", False),
                     observation_time=5,  # Just enough time to load the CAPTCHA
 
                     bypass_domain_check=True,  # Enable hosts file bypass
@@ -105,17 +101,18 @@ class CaptchaSolver:
                 
                 # If we couldn't set up the captcha
                 if not html_path:
-                    print("ERROR: Failed to set up CAPTCHA. Aborting.")
-                    return None, False
+                    error_msg = "Failed to set up CAPTCHA environment"
+                    print(f"ERROR: {error_msg}")
+                    return None, False, error_msg
                 
                 # If we already have an initial token from setup, return it
                 if initial_token and len(initial_token) > 20:  # Basic validation
                     print(f"Initial token found during setup: {initial_token[:20]}...")
-                    return initial_token, True
+                    return initial_token, True, None
                     
                 # Solve the challenge with the browser instance
                 print("\n--- Step 3: Solving reCAPTCHA Challenge ---")
-                token, success = self.challenge_solver.solve(browser)
+                token, success, error = self.challenge_solver.solve(browser)
                 
                 # If solving failed, check if token was captured by monitor thread
                 if not success or not token:
@@ -124,8 +121,11 @@ class CaptchaSolver:
                     if token:
                         success = True
                         print(f"Token found from monitor thread: {token[:20]}...")
+                        error = None
                     else:
-                        print("No token found from monitor thread.")
+                        if not error:
+                            error = "No token found from solving or monitor thread"
+                        print(f"Error: {error}")
                 
                 if success and token:
                     print(f"\n✅ reCAPTCHA solved successfully!")
@@ -133,13 +133,14 @@ class CaptchaSolver:
                 else:
                     print("\n❌ Failed to solve reCAPTCHA")
                     
-                return token, success
+                return token, success, error
             
         except Exception as e:
-            print(f"ERROR during solving process: {e}")
+            error_msg = f"Error during solving process: {str(e)}"
+            print(f"ERROR: {error_msg}")
             import traceback
             traceback.print_exc()
-            return None, False
+            return None, False, error_msg
             
         finally:
             # Clean up resources - no need to close browser as it's handled by the context manager
@@ -156,8 +157,6 @@ if __name__ == "__main__":
     captcha_params = {
         "website_key": "6Le-wvkSAAAAAPBMRTvw0Q4Muexq9bi0DJwx_mJ-",
         "website_url": "https://www.google.com/recaptcha/api2/demo",
-        "is_invisible": False,
-        "is_enterprise": False,
         "data_s_value": None  # This parameter is usually None for standard reCAPTCHA
     }
 
@@ -165,9 +164,9 @@ if __name__ == "__main__":
     solver = CaptchaSolver(wit_api_key="YOUR_API_KEY")
 
     # Run the workflow
-    token, success = solver.solve(captcha_params)
+    token, success, error = solver.solve(captcha_params)
     print(f"--> Solved: {success}")
     if success and token:
         print(f"--> Token: {token[:20]}...")
     else:
-        print("--> No token received")
+        print(f"--> No token received. Error: {error}")

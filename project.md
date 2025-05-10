@@ -10,3 +10,6 @@
 - fix captcha not being submitted : only do the token inject, check if it was added properly, done 
 - test with webshare proxy / test with proxy control mobile proxy (test original captcha and replicated captcha having different proxies), done 
 - publish pip package, done 
+
+
+- add utilities to help extract captcha params from the page and to submit captcha. maybe an utlities sub module? but they are not part of the main logic. those are simpyl helpers / utilities. the main module should be used as params input -> token output.
