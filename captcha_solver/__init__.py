@@ -61,5 +61,5 @@ def solve_captcha(captcha_type, captcha_params, solver_config=None):
         
     return result
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = ["CaptchaSolver", "solve_captcha"] 
